@@ -229,9 +229,10 @@ export async function categorizeResearch(args: {
     const response = await withRetry(() =>
       client.messages.create({
         model: "claude-sonnet-4-6",
-        // Higher cap: bodyMarkdown rewrites long source content; metadata
-        // alone fits in <1k tokens but the rewrite can run to several thousand.
-        max_tokens: 8192,
+        // Cap covers the metadata fields plus a bodyMarkdown rewrite of a
+        // reasonable-length source. Lowered from 8192 to bound per-call cost
+        // on the public deployment; for huge source documents bump back up.
+        max_tokens: 4096,
         system: CATEGORIZE_SYSTEM_PROMPT,
         tools: [CATEGORIZE_TOOL as unknown as Anthropic.Messages.Tool],
         tool_choice: { type: "tool", name: CATEGORIZE_TOOL.name },

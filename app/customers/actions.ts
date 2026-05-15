@@ -88,6 +88,14 @@ export async function researchCustomer(args: {
   const name = args.companyName.trim();
   if (!name) throw new Error("Company name is required.");
 
+  // Lockdown mode: skip the web_search-backed Claude call (the most expensive
+  // path in the app — multiple searches + a long synthesis call) and return
+  // the deterministic mock draft. Set PUBLIC_LOCKDOWN=1 in Vercel for public
+  // deployments to bound spend.
+  if (process.env.PUBLIC_LOCKDOWN === "1") {
+    return buildMockResearch(name, args.context);
+  }
+
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return buildMockResearch(name, args.context);
 
@@ -288,6 +296,11 @@ export async function researchCustomerStakeholders(args: {
   customer: Customer;
   context?: string;
 }): Promise<Person[]> {
+  // Lockdown: same rationale as researchCustomer — this call is the most
+  // expensive in the app (up to 8 web searches + a long synthesis).
+  if (process.env.PUBLIC_LOCKDOWN === "1") {
+    return buildMockStakeholders(args.customer, args.context);
+  }
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return buildMockStakeholders(args.customer, args.context);
 
