@@ -8,6 +8,11 @@ export const RECOMMENDATION_TOOL = {
   input_schema: {
     type: "object",
     properties: {
+      tldr: {
+        type: "string",
+        description:
+          "TL;DR — a single one or two line takeaway. Maximum ~220 characters. The one thing the user must do, in plain language, before they read anything else. No hedging.",
+      },
       summary: {
         type: "string",
         description:
@@ -77,13 +82,104 @@ export const RECOMMENDATION_TOOL = {
         description:
           "Ordered beats for how the story should unfold. Each beat is one short imperative sentence.",
       },
-      emphasize: {
+      dos: {
         type: "array",
+        minItems: 3,
         items: { type: "string" },
+        description:
+          "Specific Do's — concrete actions to take when presenting to this audience. Each item is one imperative sentence. Reference a named audience member, objective, or section of the artifact when relevant. No vague advice like 'be clear'.",
       },
-      avoid: {
+      donts: {
         type: "array",
+        minItems: 3,
         items: { type: "string" },
+        description:
+          "Specific Don'ts — concrete things to avoid. Each item is one imperative sentence. Reference a named audience member or known objection when relevant. No vague advice like 'avoid jargon'.",
+      },
+      practiceQA: {
+        type: "array",
+        minItems: 3,
+        maxItems: 6,
+        description:
+          "The 3–6 hardest questions this audience will ask about THIS artifact, each with the recommended answer. Be specific — quote artifact passages or numbers the questioner would press on. Don't repeat generic objections from profiles; ground each question in the artifact's content. Order by severity (sharpest first).",
+        items: {
+          type: "object",
+          properties: {
+            question: {
+              type: "string",
+              description: "The exact question, phrased as the person would ask it.",
+            },
+            askedBy: {
+              type: "string",
+              description:
+                "Named audience member most likely to ask this (e.g. 'Daniel Ortiz'). Use a role (e.g. 'CFO') if no specific named person fits.",
+            },
+            answer: {
+              type: "string",
+              description:
+                "Recommended answer — concrete, no hedging. If the answer requires a number the artifact doesn't supply, say what number to bring.",
+            },
+            severity: {
+              type: "string",
+              enum: ["low", "med", "high"],
+              description:
+                "How load-bearing is this question? 'high' = if you can't answer well, the decision is at risk.",
+            },
+          },
+          required: ["question", "answer", "severity"],
+        },
+      },
+      researchEvidence: {
+        type: "array",
+        description:
+          "When research artifacts are supplied, you MUST cite them here. Each entry pins a specific finding from a named research artifact to a part of the recommendation. Quote or paraphrase from the source — don't invent. Leave empty only if no research was supplied.",
+        items: {
+          type: "object",
+          properties: {
+            researchId: {
+              type: "string",
+              description:
+                "The id of the research artifact (provided in the audience block). Must match exactly.",
+            },
+            finding: {
+              type: "string",
+              description:
+                "What this research shows — a specific claim or quote from the artifact, not a paraphrase of the whole thing.",
+            },
+            appliedTo: {
+              type: "string",
+              description:
+                "Where in the recommendation this evidence applies — e.g. 'recommendedFraming', 'dos[1]', 'keyRisks[0]'.",
+            },
+          },
+          required: ["researchId", "finding", "appliedTo"],
+        },
+      },
+      okrAlignment: {
+        type: "array",
+        description:
+          "When OKRs are supplied, you MUST map the recommendation to each. For each OKR, state explicitly how landing this recommendation advances it. If the recommendation doesn't clearly advance an OKR, say so — don't fabricate alignment.",
+        items: {
+          type: "object",
+          properties: {
+            okrId: {
+              type: "string",
+              description: "The id of the OKR (provided in the audience block). Must match exactly.",
+            },
+            advancesHow: {
+              type: "string",
+              description:
+                "How this recommendation moves the needle on the OKR's Key Results. Be specific about which KR(s).",
+            },
+            alignment: {
+              type: "string",
+              enum: ["advances", "neutral", "tension"],
+              description:
+                "advances = this recommendation moves the OKR forward. neutral = no impact. tension = the recommendation conflicts with this OKR (surface that honestly).",
+            },
+          },
+          required: ["okrId", "advancesHow", "alignment"],
+        },
       },
       meetingApproach: {
         type: "string",
@@ -97,6 +193,7 @@ export const RECOMMENDATION_TOOL = {
       },
     },
     required: [
+      "tldr",
       "summary",
       "audienceRead",
       "fitScore",
@@ -104,13 +201,15 @@ export const RECOMMENDATION_TOOL = {
       "keyRisks",
       "recommendedFraming",
       "narrativeStructure",
-      "emphasize",
-      "avoid",
+      "dos",
+      "donts",
+      "practiceQA",
     ],
   },
 } as const;
 
 export type RecommendationToolInput = {
+  tldr: string;
   summary: string;
   audienceRead: string;
   fitScore: number;
@@ -125,8 +224,20 @@ export type RecommendationToolInput = {
     rationale: string;
   }[];
   narrativeStructure: string[];
-  emphasize: string[];
-  avoid: string[];
+  dos: string[];
+  donts: string[];
+  practiceQA: {
+    question: string;
+    askedBy?: string;
+    answer: string;
+    severity: "low" | "med" | "high";
+  }[];
+  researchEvidence?: { researchId: string; finding: string; appliedTo: string }[];
+  okrAlignment?: {
+    okrId: string;
+    advancesHow: string;
+    alignment: "advances" | "neutral" | "tension";
+  }[];
   meetingApproach?: string;
   revisedArtifact?: string;
 };

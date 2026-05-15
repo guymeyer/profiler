@@ -8,13 +8,19 @@ import {
   UsersRound,
   FileSearch,
   Sparkles,
+  Building2,
+  BookOpen,
+  Flag,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const NAV = [
   { href: "/", label: "Home", icon: LayoutDashboard },
   { href: "/people", label: "People", icon: Users },
+  { href: "/customers", label: "Customers", icon: Building2 },
+  { href: "/research", label: "Research", icon: BookOpen },
   { href: "/objectives", label: "Objectives", icon: Target },
+  { href: "/okrs", label: "OKRs", icon: Flag },
   { href: "/audience", label: "Audience builder", icon: UsersRound },
   { href: "/analyze", label: "Analyze artifact", icon: FileSearch },
 ];

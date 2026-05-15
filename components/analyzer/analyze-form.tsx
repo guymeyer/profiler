@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   FileSearch,
@@ -9,10 +9,15 @@ import {
   AlertCircle,
   Loader2,
 } from "lucide-react";
-import { PEOPLE } from "@/lib/data/people";
 import { OBJECTIVES } from "@/lib/data/objectives";
+import { useEffectivePeople, useInternalPeople, useCustomerEmployees } from "@/lib/people-hooks";
 import { useProfilerStore } from "@/lib/store";
-import { runAnalysis } from "@/app/actions";
+import { extractDocument } from "@/lib/extract/actions";
+import type {
+  AnalyzeInput,
+  PartialRecommendation,
+} from "@/lib/llm/analyze";
+import type { RecommendationResult } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input, Select, Textarea } from "@/components/ui/input";
@@ -25,8 +30,28 @@ import { SAMPLE_ARTIFACTS } from "@/lib/data/sample-artifacts";
 export function AnalyzeForm() {
   const router = useRouter();
   const params = useSearchParams();
+  const INTERNAL_PEOPLE = useInternalPeople();
+  const ALL_PEOPLE = useEffectivePeople();
   const storedPersonIds = useProfilerStore((s) => s.selectedPersonIds);
   const storedObjectiveIds = useProfilerStore((s) => s.selectedObjectiveIds);
+  const storedIntent = useProfilerStore((s) => s.audienceIntent ?? "");
+  const customers = useProfilerStore((s) => s.customers ?? {});
+  const selectedCustomerId = useProfilerStore((s) => s.selectedCustomerId);
+  const selectedCustomer = selectedCustomerId
+    ? customers[selectedCustomerId]
+    : undefined;
+  const researchMap = useProfilerStore((s) => s.research ?? {});
+  const selectedResearchIds = useProfilerStore(
+    (s) => s.selectedResearchIds ?? [],
+  );
+  const selectedResearch = selectedResearchIds
+    .map((id) => researchMap[id])
+    .filter(Boolean);
+  const okrsMap = useProfilerStore((s) => s.okrs ?? {});
+  const selectedOKRIds = useProfilerStore((s) => s.selectedOKRIds ?? []);
+  const selectedOKRs = selectedOKRIds
+    .map((id) => okrsMap[id])
+    .filter(Boolean);
   const setSelection = useProfilerStore((s) => s.setSelection);
   const togglePerson = useProfilerStore((s) => s.togglePerson);
   const toggleObjective = useProfilerStore((s) => s.toggleObjective);
@@ -55,10 +80,22 @@ export function AnalyzeForm() {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [streamingPartial, setStreamingPartial] =
+    useState<import("@/lib/llm/analyze").PartialRecommendation | null>(null);
+
+  // Lets in-flight analysis complete (and persist to the store) even if the
+  // user navigates away — but skip the auto-redirect so they aren't yanked.
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   const selectedPeople = useMemo(
-    () => PEOPLE.filter((p) => storedPersonIds.includes(p.id)),
-    [storedPersonIds],
+    () => ALL_PEOPLE.filter((p) => storedPersonIds.includes(p.id)),
+    [ALL_PEOPLE, storedPersonIds],
   );
   const selectedObjectives = useMemo(
     () => OBJECTIVES.filter((o) => storedObjectiveIds.includes(o.id)),
@@ -66,8 +103,10 @@ export function AnalyzeForm() {
   );
 
   const canSubmit =
-    selectedPeople.length > 0 &&
-    title.trim().length > 0 &&
+    (selectedPeople.length > 0 ||
+      selectedObjectives.length > 0 ||
+      !!selectedCustomer) &&
+    (strategyMode || title.trim().length > 0) &&
     (strategyMode || content.trim().length > 0) &&
     !submitting;
 
@@ -75,18 +114,40 @@ export function AnalyzeForm() {
     setUploading(true);
     setError(null);
     try {
+      // Plain text / markdown can be read directly client-side.
       if (
         file.type.startsWith("text/") ||
-        /\.(md|txt|markdown)$/i.test(file.name)
+        /\.(md|markdown|txt)$/i.test(file.name)
       ) {
         const text = await file.text();
         setContent(text);
         if (!title) setTitle(file.name.replace(/\.[^.]+$/, ""));
-      } else {
-        setError(
-          "Only text and markdown are supported in this prototype. Paste content instead.",
-        );
+        return;
       }
+
+      // PDF and DOCX go through the server-side extractor.
+      const lower = file.name.toLowerCase();
+      if (
+        file.type === "application/pdf" ||
+        file.type ===
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+        lower.endsWith(".pdf") ||
+        lower.endsWith(".docx")
+      ) {
+        const fd = new FormData();
+        fd.set("file", file);
+        const result = await extractDocument(fd);
+        setContent(result.text);
+        if (!title) setTitle(file.name.replace(/\.[^.]+$/, ""));
+        if (result.warnings.length > 0) {
+          setError(result.warnings.join(" · "));
+        }
+        return;
+      }
+
+      setError(
+        `Unsupported file type: ${file.type || "unknown"}. Supported: PDF, DOCX, TXT, MD.`,
+      );
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -97,14 +158,25 @@ export function AnalyzeForm() {
   async function handleSubmit() {
     setError(null);
     setSubmitting(true);
+    setStreamingPartial(null);
     try {
-      const result = await runAnalysis({
+      const audienceOverrides = selectedPeople; // already the effective list
+      const payload = {
         title: title.trim() || "Untitled artifact",
         type,
         rawContent: strategyMode ? "" : content,
         personIds: storedPersonIds,
         objectiveIds: storedObjectiveIds,
+        intent: storedIntent.trim() || undefined,
+        customer: selectedCustomer,
+        research: selectedResearch,
+        okrs: selectedOKRs,
         strategyOnly: strategyMode,
+        audienceOverrides,
+      };
+
+      const result = await runAnalysisStreaming(payload, (partial) => {
+        if (mountedRef.current) setStreamingPartial(partial);
       });
       storeResult(result);
       addRecent({
@@ -115,10 +187,14 @@ export function AnalyzeForm() {
         objectiveIds: result.artifact.selectedObjectiveIds,
         createdAt: result.createdAt,
       });
-      router.push(`/results/${result.id}`);
+      if (mountedRef.current) {
+        router.push(`/results/${result.id}`);
+      }
     } catch (e) {
-      setError((e as Error).message);
-      setSubmitting(false);
+      if (mountedRef.current) {
+        setError((e as Error).message);
+        setSubmitting(false);
+      }
     }
   }
 
@@ -233,7 +309,7 @@ export function AnalyzeForm() {
                   {charWarn && " · will be truncated to 60,000"}
                 </span>
                 <span>
-                  Prototype supports text & markdown upload. PDF/DOCX coming.
+                  PDF, DOCX, TXT, MD supported · max 10 MB
                 </span>
               </div>
             </Card>
@@ -242,6 +318,101 @@ export function AnalyzeForm() {
 
         {/* Sidebar */}
         <aside className="space-y-5 lg:sticky lg:top-20 lg:self-start">
+          {storedIntent.trim().length > 0 && (
+            <Card className="p-4 border-primary/20 bg-primary/[0.04]">
+              <div className="flex items-center justify-between gap-2 mb-1">
+                <div className="text-[11px] uppercase tracking-wide font-semibold text-primary">
+                  Your intent
+                </div>
+                <a
+                  href="/audience"
+                  className="text-[11px] text-muted-foreground hover:text-foreground"
+                >
+                  Edit
+                </a>
+              </div>
+              <p className="text-xs leading-relaxed text-foreground/80">
+                {storedIntent}
+              </p>
+            </Card>
+          )}
+          {selectedCustomer && (
+            <Card className="p-4 border-primary/20 bg-primary/[0.04]">
+              <div className="flex items-center justify-between gap-2 mb-1">
+                <div className="text-[11px] uppercase tracking-wide font-semibold text-primary">
+                  Customer
+                </div>
+                <a
+                  href={`/customers/${selectedCustomer.id}`}
+                  className="text-[11px] text-muted-foreground hover:text-foreground"
+                >
+                  View
+                </a>
+              </div>
+              <div className="text-sm font-medium">{selectedCustomer.name}</div>
+              {selectedCustomer.industry && (
+                <div className="text-xs text-muted-foreground">
+                  {selectedCustomer.industry}
+                </div>
+              )}
+            </Card>
+          )}
+          {selectedResearch.length > 0 && (
+            <Card className="p-4 border-primary/20 bg-primary/[0.04]">
+              <div className="flex items-center justify-between gap-2 mb-2">
+                <div className="text-[11px] uppercase tracking-wide font-semibold text-primary">
+                  Research evidence ({selectedResearch.length})
+                </div>
+                <a
+                  href="/audience"
+                  className="text-[11px] text-muted-foreground hover:text-foreground"
+                >
+                  Edit
+                </a>
+              </div>
+              <ul className="space-y-1">
+                {selectedResearch.map((r) => (
+                  <li key={r.id} className="text-xs leading-snug">
+                    <a
+                      href={`/research/${r.id}`}
+                      className="hover:underline font-medium"
+                    >
+                      {r.title}
+                    </a>
+                    <span className="text-muted-foreground"> · {r.source}</span>
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          )}
+          {selectedOKRs.length > 0 && (
+            <Card className="p-4 border-primary/20 bg-primary/[0.04]">
+              <div className="flex items-center justify-between gap-2 mb-2">
+                <div className="text-[11px] uppercase tracking-wide font-semibold text-primary">
+                  OKRs ({selectedOKRs.length})
+                </div>
+                <a
+                  href="/audience"
+                  className="text-[11px] text-muted-foreground hover:text-foreground"
+                >
+                  Edit
+                </a>
+              </div>
+              <ul className="space-y-1">
+                {selectedOKRs.map((o) => (
+                  <li key={o.id} className="text-xs leading-snug">
+                    <a
+                      href={`/okrs/${o.id}`}
+                      className="hover:underline font-medium"
+                    >
+                      {o.objective}
+                    </a>
+                    <span className="text-muted-foreground"> · {o.timeframe}</span>
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          )}
           <Card className="p-5">
             <h3 className="font-semibold mb-3">Audience</h3>
             {selectedPeople.length === 0 ? (
@@ -272,12 +443,12 @@ export function AnalyzeForm() {
               </div>
             )}
 
-            <details className="text-sm">
+            <details className="text-sm" open={selectedPeople.length === 0}>
               <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
                 Pick people
               </summary>
               <ul className="mt-2 space-y-0.5 max-h-64 overflow-auto">
-                {PEOPLE.map((p) => {
+                {INTERNAL_PEOPLE.map((p) => {
                   const sel = storedPersonIds.includes(p.id);
                   return (
                     <li key={p.id}>
@@ -325,7 +496,10 @@ export function AnalyzeForm() {
                 ))}
               </div>
             )}
-            <details className="text-sm">
+            <details
+              className="text-sm"
+              open={selectedPeople.length > 0 && selectedObjectives.length === 0}
+            >
               <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
                 Pick objectives
               </summary>
@@ -393,6 +567,44 @@ export function AnalyzeForm() {
                 </>
               )}
             </div>
+            {submitting && (
+              <div className="text-[11px] text-muted-foreground text-center">
+                Feel free to navigate away — your result will appear in{" "}
+                <a href="/" className="underline hover:text-foreground">
+                  Recents
+                </a>{" "}
+                when it&apos;s ready.
+              </div>
+            )}
+            {submitting && streamingPartial && (
+              <Card className="p-3 bg-primary/[0.04] border-primary/20 mt-2 space-y-2">
+                <div className="text-[10px] uppercase tracking-wide font-semibold text-primary">
+                  Live preview
+                </div>
+                {streamingPartial.tldr && (
+                  <p className="text-sm font-medium leading-snug">
+                    {streamingPartial.tldr}
+                  </p>
+                )}
+                {typeof streamingPartial.fitScore === "number" && (
+                  <div className="text-[11px] text-muted-foreground">
+                    Fit so far:{" "}
+                    <span className="font-semibold text-foreground">
+                      {streamingPartial.fitScore}/100
+                    </span>
+                  </div>
+                )}
+                {streamingPartial.dos && streamingPartial.dos.length > 0 && (
+                  <div className="text-[11px] text-muted-foreground">
+                    {streamingPartial.dos.length} Do
+                    {streamingPartial.dos.length === 1 ? "" : "'s"} drafted
+                    {streamingPartial.donts &&
+                      streamingPartial.donts.length > 0 &&
+                      ` · ${streamingPartial.donts.length} Don't${streamingPartial.donts.length === 1 ? "" : "s"}`}
+                  </div>
+                )}
+              </Card>
+            )}
           </div>
         </aside>
       </div>
@@ -459,7 +671,7 @@ function FileDrop({
     >
       <input
         type="file"
-        accept=".txt,.md,.markdown,text/plain,text/markdown"
+        accept=".txt,.md,.markdown,.pdf,.docx,text/plain,text/markdown,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         className="hidden"
         onChange={(e) => {
           const f = e.target.files?.[0];
@@ -471,7 +683,7 @@ function FileDrop({
         {uploading ? "Reading…" : "Drop a file, or click to choose"}
       </div>
       <div className="text-xs text-muted-foreground">
-        Text & markdown supported in this prototype
+        PDF, DOCX, TXT, or MD · text extraction runs server-side
       </div>
       {hasContent && (
         <div className="mt-3 w-full max-w-md text-xs text-foreground/70 bg-muted/60 p-2 rounded font-mono line-clamp-3">
@@ -480,4 +692,53 @@ function FileDrop({
       )}
     </label>
   );
+}
+
+// Streams the analyze endpoint via NDJSON. Parses each line as a JSON event
+// and dispatches partial updates to the caller. Resolves with the final
+// RecommendationResult once the server emits a "complete" event.
+async function runAnalysisStreaming(
+  payload: AnalyzeInput,
+  onPartial: (partial: PartialRecommendation) => void,
+): Promise<RecommendationResult> {
+  const res = await fetch("/api/analyze/stream", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok || !res.body) {
+    throw new Error(`Stream request failed (${res.status}).`);
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  let final: RecommendationResult | null = null;
+  let errorMsg: string | null = null;
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (value) buf += decoder.decode(value, { stream: !done });
+    let nl: number;
+    while ((nl = buf.indexOf("\n")) !== -1) {
+      const line = buf.slice(0, nl).trim();
+      buf = buf.slice(nl + 1);
+      if (!line) continue;
+      try {
+        const evt = JSON.parse(line) as
+          | { type: "partial"; partial: PartialRecommendation }
+          | { type: "complete"; result: RecommendationResult }
+          | { type: "error"; message: string };
+        if (evt.type === "partial") onPartial(evt.partial);
+        else if (evt.type === "complete") final = evt.result;
+        else if (evt.type === "error") errorMsg = evt.message;
+      } catch {
+        // skip malformed line — server side controls the format
+      }
+    }
+    if (done) break;
+  }
+
+  if (errorMsg) throw new Error(errorMsg);
+  if (!final) throw new Error("Stream ended without a complete result.");
+  return final;
 }

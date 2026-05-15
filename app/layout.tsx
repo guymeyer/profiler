@@ -20,6 +20,13 @@ export const metadata: Metadata = {
     "Understand how to present work to specific people, leadership groups, and business objectives.",
 };
 
+// Vercel Pro caps maxDuration at 300s. Long analyses and customer/stakeholder
+// research (which uses web_search and can chain several searches) routinely
+// run 60-120s; the stream endpoint can run longer still. Setting on the root
+// layout applies to all nested route segments unless individual files
+// override.
+export const maxDuration = 300;
+
 export default function RootLayout({
   children,
 }: Readonly<{
