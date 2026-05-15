@@ -2,26 +2,25 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { jwtVerify, createRemoteJWKSet } from "jose";
 
-// Belt-and-braces auth gate. Cloudflare Access is the primary protection —
-// it sits in front of the deployment and won't pass traffic through without a
-// valid Access session. This middleware additionally verifies the JWT
-// Cloudflare Access injects on each request, so even if someone hits the raw
-// Vercel deployment URL directly (bypassing the Cloudflare-routed domain),
-// they're rejected.
+// Optional Cloudflare Access JWT verification layer. Only active when the
+// CF_ACCESS_TEAM and CF_ACCESS_AUD env vars are set — when they're absent,
+// the middleware passes through and assumes another gate (typically Vercel
+// Deployment Protection / Vercel Authentication) is protecting the deploy.
 //
-// Config (set in Vercel project env):
+// Config (set in Vercel project env, only when using Cloudflare Access):
 //   CF_ACCESS_TEAM   — your team slug, e.g. "yourcompany"
 //                      (full URL: https://<team>.cloudflareaccess.com)
 //   CF_ACCESS_AUD    — the Application Audience tag from the Access app
 //                      settings in the Cloudflare Zero Trust dashboard.
 //
 // Behavior:
-//   - In `next dev` (NODE_ENV !== "production"): pass through.
-//   - In production with config missing: 503 (fail-closed; better than
-//     accidentally shipping the app publicly while you're still wiring up
-//     Cloudflare).
-//   - In production with config set: verify Cf-Access-Jwt-Assertion. Reject
-//     missing or invalid tokens.
+//   - `next dev` (NODE_ENV !== "production"): pass through.
+//   - Production, CF config absent: pass through. Vercel's own deployment
+//     protection (if enabled) is the gate; if it's not enabled, the deploy
+//     is public. Make sure exactly one of (Vercel Auth, Cloudflare Access,
+//     or this middleware's CF mode) is active before sharing the URL.
+//   - Production, CF config present: require + verify Cf-Access-Jwt-Assertion
+//     header. Defense-in-depth on top of CF Access.
 
 const CF_TEAM = process.env.CF_ACCESS_TEAM;
 const CF_AUD = process.env.CF_ACCESS_AUD;
@@ -38,14 +37,10 @@ export async function middleware(req: NextRequest) {
   // Local dev bypass.
   if (process.env.NODE_ENV !== "production") return NextResponse.next();
 
-  // Fail closed if production is missing config — never accidentally serve
-  // the app publicly.
-  if (!CF_TEAM || !CF_AUD || !JWKS) {
-    return new NextResponse(
-      "Server misconfigured: CF_ACCESS_TEAM / CF_ACCESS_AUD not set.",
-      { status: 503 },
-    );
-  }
+  // No Cloudflare Access config — middleware steps aside and assumes another
+  // gate (Vercel Auth, IP allowlist, etc.) is doing the protection. If you
+  // want this layer to be your only auth, set CF_ACCESS_TEAM + CF_ACCESS_AUD.
+  if (!CF_TEAM || !CF_AUD || !JWKS) return NextResponse.next();
 
   const jwt = req.headers.get("Cf-Access-Jwt-Assertion");
   if (!jwt) {
