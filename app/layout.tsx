@@ -18,6 +18,21 @@ export const metadata: Metadata = {
   title: "Profiler — Audience intelligence",
   description:
     "Understand how to present work to specific people, leadership groups, and business objectives.",
+  // Keep the prototype out of search results. Belt-and-braces: also set
+  // X-Robots-Tag via next.config.ts headers() and a Disallow-all robots.txt.
+  robots: {
+    index: false,
+    follow: false,
+    nocache: true,
+    googleBot: {
+      index: false,
+      follow: false,
+      noimageindex: true,
+      "max-video-preview": -1,
+      "max-image-preview": "none",
+      "max-snippet": -1,
+    },
+  },
 };
 
 // Vercel Pro caps maxDuration at 300s. Long analyses and customer/stakeholder
