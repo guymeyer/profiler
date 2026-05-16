@@ -29,7 +29,7 @@ import {
 import {
   researchCustomer,
   researchCustomerStakeholders,
-} from "@/app/customers/actions";
+} from "@/app/(app)/customers/actions";
 import {
   useCustomerEmployees,
   INFLUENCE_LEVELS,

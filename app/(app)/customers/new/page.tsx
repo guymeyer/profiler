@@ -14,7 +14,7 @@ import {
   markdownToCustomer,
   slugifyId,
 } from "@/lib/customer-md";
-import { researchCustomer } from "@/app/customers/actions";
+import { researchCustomer } from "@/app/(app)/customers/actions";
 
 export default function NewCustomerPage() {
   return (

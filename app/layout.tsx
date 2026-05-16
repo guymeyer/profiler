@@ -1,8 +1,7 @@
 import type { Metadata } from "next";
+import { ClerkProvider } from "@clerk/nextjs";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
-import { Sidebar } from "@/components/layout/sidebar";
-import { Topbar } from "@/components/layout/topbar";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -18,8 +17,8 @@ export const metadata: Metadata = {
   title: "Profiler — Audience intelligence",
   description:
     "Understand how to present work to specific people, leadership groups, and business objectives.",
-  // Keep the prototype out of search results. Belt-and-braces: also set
-  // X-Robots-Tag via next.config.ts headers() and a Disallow-all robots.txt.
+  // Keep the prototype out of search results. Also set X-Robots-Tag in
+  // next.config.ts headers() and serve a Disallow-all robots.txt.
   robots: {
     index: false,
     follow: false,
@@ -35,11 +34,10 @@ export const metadata: Metadata = {
   },
 };
 
-// Vercel Pro caps maxDuration at 300s. Long analyses and customer/stakeholder
-// research (which uses web_search and can chain several searches) routinely
-// run 60-120s; the stream endpoint can run longer still. Setting on the root
-// layout applies to all nested route segments unless individual files
-// override.
+// Long analyses and customer/stakeholder research routinely run 60–120s;
+// the stream endpoint can run longer still. Vercel Pro caps maxDuration
+// at 300s. Setting on the root layout applies to every nested route
+// segment unless overridden.
 export const maxDuration = 300;
 
 export default function RootLayout({
@@ -48,21 +46,13 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html
-      lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
-    >
-      <body className="min-h-full">
-        <div className="min-h-screen flex">
-          <Sidebar />
-          <div className="flex-1 flex flex-col min-w-0">
-            <Topbar />
-            <main className="flex-1 px-4 md:px-8 py-6 md:py-8">
-              {children}
-            </main>
-          </div>
-        </div>
-      </body>
-    </html>
+    <ClerkProvider>
+      <html
+        lang="en"
+        className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      >
+        <body className="min-h-full">{children}</body>
+      </html>
+    </ClerkProvider>
   );
 }

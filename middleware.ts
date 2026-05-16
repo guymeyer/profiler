@@ -1,42 +1,31 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
-import { jwtVerify, createRemoteJWKSet } from "jose";
+import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 
-// Edge middleware: two responsibilities.
+// Middleware stack, applied in order:
 //
-// 1. Optional Cloudflare Access JWT verification (when CF_ACCESS_TEAM and
-//    CF_ACCESS_AUD are set). Otherwise passes through and assumes Vercel
-//    Deployment Protection or another gate is providing auth.
+// 1. Per-IP rate limit on expensive POST requests. In-memory sliding window —
+//    survives only within one Edge function instance, so cold starts reset
+//    counters. A real shared limit needs Upstash Redis. This is fine for
+//    prototype traffic but isn't airtight against distributed abuse.
 //
-// 2. Per-IP rate limit on expensive requests (POST /api/* and Next.js
-//    server actions). In-memory sliding-window — survives only within one
-//    Edge function instance, so a cold start resets counters. That's fine
-//    for a prototype where Vercel's serverless scaling keeps instances
-//    warm-ish under load; it's a meaningful brake on a single client
-//    hammering one instance, not a defense against distributed abuse.
-//    For a sturdier limit, add Upstash Redis or Vercel KV.
+// 2. Clerk auth. Sign-in / sign-up routes are public. Everything else
+//    requires a signed-in user. Routes that require an active organization
+//    are enforced inside server components via requireWorkspace().
+//
+// 3. (Removed) Cloudflare Access JWT verification. We standardized on Clerk
+//    + Vercel-native protection; the CF Access middleware was deleted
+//    rather than left dormant.
 
-// ─── Cloudflare Access ──────────────────────────────────────────────────────
-
-const CF_TEAM = process.env.CF_ACCESS_TEAM;
-const CF_AUD = process.env.CF_ACCESS_AUD;
-
-const JWKS = CF_TEAM
-  ? createRemoteJWKSet(
-      new URL(`https://${CF_TEAM}.cloudflareaccess.com/cdn-cgi/access/certs`),
-    )
-  : null;
-
-// ─── Rate limit ─────────────────────────────────────────────────────────────
+// ─── Rate limit (per IP, in-memory, sliding window) ─────────────────────────
 
 const RATE_LIMIT_MAX = 10;
-const RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000; // 1 hour
+const RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000;
 
 interface Bucket {
   count: number;
   resetAt: number;
 }
-// Per-instance map. Cold starts reset it. Acceptable for a prototype.
 const ipBuckets = new Map<string, Bucket>();
 
 function getClientIp(req: NextRequest): string {
@@ -49,9 +38,7 @@ function getClientIp(req: NextRequest): string {
 
 function isExpensiveRequest(req: NextRequest): boolean {
   if (req.method !== "POST") return false;
-  // Streaming analyze endpoint.
   if (req.nextUrl.pathname.startsWith("/api/")) return true;
-  // Server actions — Next.js posts back to the page path with this header.
   if (req.headers.has("next-action")) return true;
   return false;
 }
@@ -66,11 +53,7 @@ function consumeQuota(ip: string): {
   if (!bucket || bucket.resetAt < now) {
     const fresh: Bucket = { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS };
     ipBuckets.set(ip, fresh);
-    return {
-      ok: true,
-      remaining: RATE_LIMIT_MAX - 1,
-      resetAt: fresh.resetAt,
-    };
+    return { ok: true, remaining: RATE_LIMIT_MAX - 1, resetAt: fresh.resetAt };
   }
   if (bucket.count >= RATE_LIMIT_MAX) {
     return { ok: false, remaining: 0, resetAt: bucket.resetAt };
@@ -91,38 +74,21 @@ function rateLimitHeaders(remaining: number, resetAt: number) {
   };
 }
 
-// ─── Middleware entrypoint ──────────────────────────────────────────────────
+// ─── Clerk auth + public route allowlist ────────────────────────────────────
 
-export async function middleware(req: NextRequest) {
-  // Local dev bypass.
-  if (process.env.NODE_ENV !== "production") return NextResponse.next();
+// Routes accessible without a Clerk session. Everything else is protected.
+const isPublicRoute = createRouteMatcher([
+  "/sign-in(.*)",
+  "/sign-up(.*)",
+  // Health checks if we add any later
+  "/api/health(.*)",
+]);
 
-  // Cloudflare Access JWT check (only when configured).
-  if (CF_TEAM && CF_AUD && JWKS) {
-    const jwt = req.headers.get("Cf-Access-Jwt-Assertion");
-    if (!jwt) {
-      return new NextResponse(
-        "Forbidden — this application must be accessed via Cloudflare Access.",
-        { status: 403 },
-      );
-    }
-    try {
-      await jwtVerify(jwt, JWKS, {
-        issuer: `https://${CF_TEAM}.cloudflareaccess.com`,
-        audience: CF_AUD,
-      });
-    } catch {
-      return new NextResponse("Forbidden — invalid Cloudflare Access token.", {
-        status: 403,
-      });
-    }
-  }
-
-  // Rate limit expensive requests by IP.
-  if (isExpensiveRequest(req)) {
+export default clerkMiddleware(async (auth, req) => {
+  // Local dev keeps Clerk gating but skips rate limit so iteration is fast.
+  if (process.env.NODE_ENV === "production" && isExpensiveRequest(req)) {
     const ip = getClientIp(req);
     const { ok, remaining, resetAt } = consumeQuota(ip);
-    const headers = rateLimitHeaders(remaining, resetAt);
     if (!ok) {
       const retryAfter = Math.max(1, Math.ceil((resetAt - Date.now()) / 1000));
       return new NextResponse(
@@ -134,23 +100,30 @@ export async function middleware(req: NextRequest) {
         {
           status: 429,
           headers: {
-            ...headers,
+            ...rateLimitHeaders(remaining, resetAt),
             "Content-Type": "application/json",
             "Retry-After": String(retryAfter),
           },
         },
       );
     }
-    const res = NextResponse.next();
-    for (const [k, v] of Object.entries(headers)) res.headers.set(k, v);
-    return res;
+    // Rate-limit headers are added to successful responses too; we can't
+    // mutate the Clerk-protected response easily, so we just continue.
   }
 
+  // Public routes: skip auth.
+  if (isPublicRoute(req)) return NextResponse.next();
+
+  // Everything else requires a session. The orgId / workspace check happens
+  // in server components via requireWorkspace() — sending users to
+  // /onboarding/company when they have a user but no active org.
+  await auth.protect();
   return NextResponse.next();
-}
+});
 
 export const config = {
   matcher: [
+    // Run on all paths except Next.js internals and static files.
     "/((?!_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml).*)",
   ],
 };
