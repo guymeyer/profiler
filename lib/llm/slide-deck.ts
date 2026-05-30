@@ -3,11 +3,11 @@ import Anthropic from "@anthropic-ai/sdk";
 import { serializePerson, serializeObjective } from "@/lib/llm/prompts";
 import type {
   DeckAudience,
+  DeckDocument,
+  MicrositeDocument,
   Objective,
   Person,
   Slide,
-  SlideDeck,
-  Synthesis,
   SynthesisOutline,
 } from "@/lib/types";
 
@@ -18,7 +18,7 @@ import type {
 const DEFAULT_MODEL = "claude-sonnet-4-6";
 
 export interface GenerateDeckInput {
-  synthesis: Synthesis;
+  synthesis: MicrositeDocument;
   audience: DeckAudience;
   // Resolved audience entities — the caller looks these up from store and
   // passes them so the LLM gets full profile context for each person and
@@ -179,7 +179,7 @@ function serializeAudience(input: GenerateDeckInput): string {
 
 export async function generateSlideDeck(
   input: GenerateDeckInput,
-): Promise<SlideDeck> {
+): Promise<DeckDocument> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
     return buildMockDeck(input);
@@ -191,7 +191,7 @@ export async function generateSlideDeck(
   const userContent: Anthropic.Messages.ContentBlockParam[] = [
     {
       type: "text",
-      text: serializeOutline(input.synthesis.outline),
+      text: serializeOutline(input.synthesis.properties.outline),
       cache_control: { type: "ephemeral" },
     },
     { type: "text", text: serializeAudience(input) },
@@ -249,7 +249,7 @@ export async function generateSlideDeck(
   });
 }
 
-function defaultTitle(synthesis: Synthesis, people: Person[]): string {
+function defaultTitle(synthesis: MicrositeDocument, people: Person[]): string {
   if (people.length === 0) return synthesis.title;
   if (people.length === 1) return `${synthesis.title} — for ${people[0].name}`;
   if (people.length <= 3)
@@ -263,23 +263,32 @@ function finalizeDeck(args: {
   input: GenerateDeckInput;
   generatedBy: "anthropic" | "mock";
   model?: string;
-}): SlideDeck {
+}): DeckDocument {
   return {
     id: `deck_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
-    synthesisId: args.input.synthesis.id,
+    kind: "deck",
     title: args.title,
-    audience: args.input.audience,
-    slides: args.slides,
-    generatedBy: args.generatedBy,
-    model: args.model,
+    summary: "",
+    content: "",
+    tags: [],
+    linkedPersonIds: [],
+    linkedCustomerIds: [],
+    linkedObjectiveIds: [],
     createdAt: new Date().toISOString(),
+    properties: {
+      synthesisId: args.input.synthesis.id,
+      audience: args.input.audience,
+      slides: args.slides,
+      generatedBy: args.generatedBy,
+      model: args.model,
+    },
   };
 }
 
 // Deterministic mock — produces a sensible deck from the outline without an
 // API key so the demo arc never breaks.
-function buildMockDeck(input: GenerateDeckInput): SlideDeck {
-  const outline = input.synthesis.outline;
+function buildMockDeck(input: GenerateDeckInput): DeckDocument {
+  const outline = input.synthesis.properties.outline;
   const general =
     outline.lenses.general ?? Object.values(outline.lenses)[0];
   const insights = general?.insights ?? [];

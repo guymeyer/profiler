@@ -8,8 +8,8 @@ import type {
   DerivedMetric,
   Objective,
   OKR,
-  PRD,
-  ResearchArtifact,
+  PRDDocument,
+  ResearchDocument,
 } from "@/lib/types";
 
 // Generates a BU-level recommendation rollup by comparing every metric tied
@@ -22,8 +22,8 @@ const MAX_RESEARCH_CHARS = 8_000;
 export interface BURecommendationsInput {
   businessUnit: BusinessUnit;
   metrics: DerivedMetric[];
-  research: ResearchArtifact[]; // the research that produced observed metrics
-  prds?: PRD[]; // PRDs scoped to this BU (planned intent)
+  research: ResearchDocument[]; // the research that produced observed metrics
+  prds?: PRDDocument[]; // PRDs scoped to this BU (planned intent)
   okrs: OKR[]; // BU-scoped OKRs
   objectives: Objective[]; // abstract objectives library (full set)
 }
@@ -157,7 +157,7 @@ function serializeMetrics(metrics: DerivedMetric[]): string {
     .join("\n");
 }
 
-function serializeResearch(rs: ResearchArtifact[]): string {
+function serializeResearch(rs: ResearchDocument[]): string {
   if (rs.length === 0) return "(no research available)";
   return rs
     .map((r) => {
@@ -167,7 +167,7 @@ function serializeResearch(rs: ResearchArtifact[]): string {
             `\n[…truncated from ${r.content.length} chars]`
           : r.content;
       return `## id: ${r.id} | ${r.title}
-Source: ${r.source}${r.conductedAt ? ` | Conducted: ${r.conductedAt}` : ""}
+Source: ${r.source ?? "Internal"}${r.properties.conductedAt ? ` | Conducted: ${r.properties.conductedAt}` : ""}
 
 Summary: ${r.summary}
 
@@ -177,12 +177,12 @@ ${body}`;
     .join("\n\n---\n\n");
 }
 
-function serializePRDs(prds: PRD[]): string {
+function serializePRDs(prds: PRDDocument[]): string {
   if (prds.length === 0) return "(no PRDs scoped to this BU)";
   return prds
     .map(
       (p) =>
-        `- id: ${p.id} | ${p.title} (status: ${p.status}${p.targetShipDate ? `, target ship ${p.targetShipDate}` : ""})\n  Problem: ${p.problem || "(unstated)"}\n  Solution: ${p.solution || "(unstated)"}\n  Success metrics:\n${p.successMetrics.map((s) => `    - ${s}`).join("\n") || "    (none stated)"}`,
+        `- id: ${p.id} | ${p.title} (status: ${p.properties.status}${p.properties.targetShipDate ? `, target ship ${p.properties.targetShipDate}` : ""})\n  Problem: ${p.properties.problem || "(unstated)"}\n  Solution: ${p.properties.solution || "(unstated)"}\n  Success metrics:\n${p.properties.successMetrics.map((s) => `    - ${s}`).join("\n") || "    (none stated)"}`,
     )
     .join("\n\n");
 }

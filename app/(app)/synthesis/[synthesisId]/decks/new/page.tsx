@@ -16,7 +16,7 @@ import { AudienceSelector } from "@/components/audience-selector";
 import { useProfilerStore } from "@/lib/store";
 import { useEffectivePeople } from "@/lib/people-hooks";
 import { OBJECTIVES } from "@/lib/data/objectives";
-import type { DeckAudience, SlideDeck } from "@/lib/types";
+import type { DeckAudience, DeckDocument, MicrositeDocument } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 interface Props {
@@ -26,8 +26,11 @@ interface Props {
 export default function NewDeckPage({ params }: Props) {
   const { synthesisId } = use(params);
   const router = useRouter();
-  const synthesis = useProfilerStore((s) => s.syntheses?.[synthesisId]);
-  const saveDeck = useProfilerStore((s) => s.saveDeck);
+  const documents = useProfilerStore((s) => s.documents ?? {});
+  const synthRaw = documents[synthesisId];
+  const synthesis: MicrositeDocument | undefined =
+    synthRaw?.kind === "microsite" ? synthRaw : undefined;
+  const saveDocument = useProfilerStore((s) => s.saveDocument);
   const people = useEffectivePeople();
 
   const [hydrated, setHydrated] = useState(false);
@@ -85,9 +88,9 @@ export default function NewDeckPage({ params }: Props) {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.error ?? `Generation failed (${res.status}).`);
       }
-      const { deck } = (await res.json()) as { deck: SlideDeck };
-      saveDeck(deck);
-      router.push(`/synthesis/${synthesis.id}/decks/${deck.id}`);
+      const { deck } = (await res.json()) as { deck: DeckDocument };
+      saveDocument(deck);
+      router.push(`/synthesis/${synthesis!.id}/decks/${deck.id}`);
     } catch (e) {
       setError((e as Error).message);
       setGenerating(false);

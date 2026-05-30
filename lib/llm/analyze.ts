@@ -6,7 +6,7 @@ import type {
   Person,
   Objective,
   Customer,
-  ResearchArtifact,
+  ResearchDocument,
   OKR,
   BusinessUnit,
 } from "@/lib/types";
@@ -66,7 +66,7 @@ export interface AnalyzeInput {
   objectiveIds: string[];
   intent?: string;
   customer?: Customer;
-  research?: ResearchArtifact[];
+  research?: ResearchDocument[];
   okrs?: OKR[];
   businessUnits?: Record<string, BusinessUnit>;
   strategyOnly?: boolean;

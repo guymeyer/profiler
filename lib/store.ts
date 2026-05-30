@@ -8,73 +8,11 @@ import type {
   Customer,
   BusinessUnit,
   OKR,
-  Synthesis,
   DerivedMetric,
   BURecommendationSet,
-  SlideDeck,
   Document,
 } from "@/lib/types";
 import { migrateV1ToV2 } from "@/lib/store-migrations";
-
-// Adapters for synthesis + deck: their primary store slice (the bespoke
-// viewer reads from `syntheses` / `decks` for now) writes a Document
-// mirror so the unified `documents` index sees them too.
-function synthesisToDocument(s: Synthesis): Document {
-  return {
-    id: s.id,
-    kind: "microsite",
-    title: s.title,
-    summary: "",
-    content: "",
-    tags: [],
-    linkedPersonIds: [],
-    linkedCustomerIds: [],
-    linkedObjectiveIds: [],
-    createdAt: s.createdAt,
-    updatedAt: s.updatedAt,
-    properties: {
-      researchIds: s.researchIds,
-      outline: s.outline,
-      html: s.html,
-      modifier: s.modifier,
-      generatedBy: s.generatedBy,
-      model: s.model,
-    },
-  };
-}
-
-function deckToDocument(d: SlideDeck): Document {
-  return {
-    id: d.id,
-    kind: "deck",
-    title: d.title,
-    summary: "",
-    content: "",
-    tags: [],
-    linkedPersonIds: [],
-    linkedCustomerIds: [],
-    linkedObjectiveIds: [],
-    createdAt: d.createdAt,
-    updatedAt: d.updatedAt,
-    properties: {
-      synthesisId: d.synthesisId,
-      audience: d.audience,
-      slides: d.slides,
-      generatedBy: d.generatedBy,
-      model: d.model,
-    },
-  };
-}
-
-function dropFromDocuments(
-  documents: Record<string, Document>,
-  id: string,
-): Record<string, Document> {
-  if (!(id in documents)) return documents;
-  const next = { ...documents };
-  delete next[id];
-  return next;
-}
 
 interface AudienceSelection {
   personIds: string[];
@@ -132,6 +70,11 @@ interface ProfilerStore {
   resultsDepth: 1 | 2 | 3 | 4;
   setResultsDepth: (d: 1 | 2 | 3 | 4) => void;
 
+  // Whether the document detail page's Properties panel starts open. Global
+  // preference so closing it on one doc keeps it closed on the next.
+  propertiesPanelOpen: boolean;
+  setPropertiesPanelOpen: (open: boolean) => void;
+
   // Editable people overlay (override seed by id; new custom people too)
   customProfiles: Record<string, Person>;
   saveProfile: (p: Person) => void;
@@ -164,33 +107,23 @@ interface ProfilerStore {
   toggleOKR: (id: string) => void;
   clearSelectedOKRs: () => void;
 
-  // Research syntheses (microsites)
-  syntheses: Record<string, Synthesis>;
-  saveSynthesis: (s: Synthesis) => void;
-  deleteSynthesis: (id: string) => void;
-
   // Derived metrics (auto-extracted from research / PRDs / memos)
   metrics: Record<string, DerivedMetric>;
   // Replace ALL metrics tied to one document. Used by extract flows so
-  // re-running extraction on a document doesn't leave stale rows. Three
-  // entry points for now — they share filter logic by sourceKind.
-  replaceMetricsForResearch: (documentId: string, next: DerivedMetric[]) => void;
-  replaceMetricsForPRD: (documentId: string, next: DerivedMetric[]) => void;
-  replaceMetricsForMemo: (documentId: string, next: DerivedMetric[]) => void;
+  // re-running extraction on a document doesn't leave stale rows.
+  // sourceKind narrows the filter — passing it explicitly avoids reading
+  // the (possibly stale) document slice.
+  replaceMetricsForDocument: (
+    documentId: string,
+    sourceKind: "research" | "prd" | "memo",
+    next: DerivedMetric[],
+  ) => void;
   deleteMetric: (id: string) => void;
 
   // BU-level recommendation rollups, one per businessUnitId.
   buRecommendations: Record<string, BURecommendationSet>;
   saveBURecommendations: (r: BURecommendationSet) => void;
   deleteBURecommendations: (businessUnitId: string) => void;
-
-  // Slide decks — presentation derivatives of a synthesis. Many per
-  // synthesis (one per audience). The deck viewer is bespoke, so decks
-  // keep their own slice in addition to surfacing as `kind: "deck"`
-  // documents in the `documents` index.
-  decks: Record<string, SlideDeck>;
-  saveDeck: (d: SlideDeck) => void;
-  deleteDeck: (id: string) => void;
 
   // Unified documents — the source of truth for research, PRDs, memos,
   // microsites, decks, and future kinds (postmortem/rfc/note).
@@ -294,6 +227,9 @@ export const useProfilerStore = create<ProfilerStore>()(
       resultsDepth: 3,
       setResultsDepth: (d) => set({ resultsDepth: d }),
 
+      propertiesPanelOpen: false,
+      setPropertiesPanelOpen: (open) => set({ propertiesPanelOpen: open }),
+
       customProfiles: {},
       saveProfile: (p) =>
         set((s) => ({ customProfiles: { ...s.customProfiles, [p.id]: p } })),
@@ -364,29 +300,13 @@ export const useProfilerStore = create<ProfilerStore>()(
         })),
       clearSelectedOKRs: () => set({ selectedOKRIds: [] }),
 
-      syntheses: {},
-      saveSynthesis: (s) =>
-        set((state) => ({
-          syntheses: { ...state.syntheses, [s.id]: s },
-          documents: { ...state.documents, [s.id]: synthesisToDocument(s) },
-        })),
-      deleteSynthesis: (id) =>
-        set((state) => {
-          const next = { ...state.syntheses };
-          delete next[id];
-          return {
-            syntheses: next,
-            documents: dropFromDocuments(state.documents, id),
-          };
-        }),
-
       metrics: {},
-      replaceMetricsForResearch: (researchId, next) =>
+      replaceMetricsForDocument: (documentId, sourceKind, next) =>
         set((state) => {
           const remaining: Record<string, DerivedMetric> = {};
           for (const [id, m] of Object.entries(state.metrics)) {
             if (
-              !(m.sourceKind === "research" && m.sourceDocumentId === researchId)
+              !(m.sourceKind === sourceKind && m.sourceDocumentId === documentId)
             ) {
               remaining[id] = m;
             }
@@ -416,46 +336,6 @@ export const useProfilerStore = create<ProfilerStore>()(
           return { buRecommendations: next };
         }),
 
-      replaceMetricsForPRD: (documentId, next) =>
-        set((state) => {
-          const remaining: Record<string, DerivedMetric> = {};
-          for (const [id, m] of Object.entries(state.metrics)) {
-            if (!(m.sourceKind === "prd" && m.sourceDocumentId === documentId)) {
-              remaining[id] = m;
-            }
-          }
-          for (const m of next) remaining[m.id] = m;
-          return { metrics: remaining };
-        }),
-
-      replaceMetricsForMemo: (documentId, next) =>
-        set((state) => {
-          const remaining: Record<string, DerivedMetric> = {};
-          for (const [id, m] of Object.entries(state.metrics)) {
-            if (!(m.sourceKind === "memo" && m.sourceDocumentId === documentId)) {
-              remaining[id] = m;
-            }
-          }
-          for (const m of next) remaining[m.id] = m;
-          return { metrics: remaining };
-        }),
-
-      decks: {},
-      saveDeck: (d) =>
-        set((state) => ({
-          decks: { ...state.decks, [d.id]: d },
-          documents: { ...state.documents, [d.id]: deckToDocument(d) },
-        })),
-      deleteDeck: (id) =>
-        set((state) => {
-          const next = { ...state.decks };
-          delete next[id];
-          return {
-            decks: next,
-            documents: dropFromDocuments(state.documents, id),
-          };
-        }),
-
       documents: {},
       saveDocument: (d) =>
         set((state) => ({ documents: { ...state.documents, [d.id]: d } })),
@@ -482,6 +362,22 @@ export const useProfilerStore = create<ProfilerStore>()(
       name: "profiler-store-v2",
       version: 2,
       storage: createJSONStorage(() => localStorage),
+      // Strip render caches from the persisted snapshot. The microsite
+      // `html` blob is regenerated deterministically from the outline by
+      // lib/llm/synthesize-render.ts; persisting it bloats localStorage
+      // toward the 5MB quota and slows every write. Keep the in-memory
+      // copy intact — `partialize` only affects what gets serialized.
+      partialize: (state) =>
+        ({
+          ...state,
+          documents: Object.fromEntries(
+            Object.entries(state.documents).map(([id, d]) =>
+              d.kind === "microsite"
+                ? [id, { ...d, properties: { ...d.properties, html: undefined } }]
+                : [id, d],
+            ),
+          ),
+        }) as typeof state,
       migrate: (persisted, fromVersion) => {
         try {
           if (fromVersion < 2) return migrateV1ToV2(persisted);

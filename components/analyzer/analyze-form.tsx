@@ -18,7 +18,7 @@ import type {
   PartialRecommendation,
 } from "@/lib/llm/analyze";
 import type { RecommendationResult } from "@/lib/types";
-import { documentToResearch } from "@/lib/document-adapters";
+import type { ResearchDocument } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input, Select, Textarea } from "@/components/ui/input";
@@ -170,7 +170,7 @@ export function AnalyzeForm() {
         objectiveIds: storedObjectiveIds,
         intent: storedIntent.trim() || undefined,
         customer: selectedCustomer,
-        research: selectedResearch.map(documentToResearch),
+        research: selectedResearch as ResearchDocument[],
         okrs: selectedOKRs,
         strategyOnly: strategyMode,
         audienceOverrides,

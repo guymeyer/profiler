@@ -16,6 +16,7 @@ const NAV = [
   { href: "/audience", label: "Audience builder" },
   { href: "/analyze", label: "Analyze artifact" },
   { href: "/synthesis", label: "Synthesis" },
+  { href: "/graph", label: "Graph" },
 ];
 
 export function Sidebar() {

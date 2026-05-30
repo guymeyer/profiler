@@ -2,7 +2,8 @@ import {
   SYNTHESIS_LENSES,
   type Person,
   type PersonLensSection,
-  type ResearchArtifact,
+  type PRDDocument,
+  type ResearchDocument,
   type SynthesisLens,
   type SynthesisLensSection,
   type SynthesisOutline,
@@ -14,8 +15,8 @@ import {
 
 interface MockInput {
   title?: string;
-  research: ResearchArtifact[];
-  prds?: import("@/lib/types").PRD[];
+  research: ResearchDocument[];
+  prds?: PRDDocument[];
   people?: Person[];
   modifier?: string;
 }
@@ -62,7 +63,7 @@ export function buildMockSynthesisOutline(
 
 function buildPersonLensSection(
   p: Person,
-  research: ResearchArtifact[],
+  research: ResearchDocument[],
 ): PersonLensSection {
   const firstName = p.name.split(" ")[0];
   const titles = research.map((r) => r.title);
@@ -116,7 +117,7 @@ function buildPersonLensSection(
 
 function buildLensSection(
   lens: SynthesisLens,
-  research: ResearchArtifact[],
+  research: ResearchDocument[],
 ): SynthesisLensSection {
   const titles = research.map((r) => r.title);
   return {

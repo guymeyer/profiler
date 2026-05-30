@@ -3,58 +3,32 @@ import Anthropic from "@anthropic-ai/sdk";
 import type {
   BusinessUnit,
   DerivedMetric,
-  Memo,
+  MemoDocument,
   MetricChangeDirection,
   MetricChangeUnit,
   MetricKind,
   MetricSentiment,
-  PRD,
-  ResearchArtifact,
+  PRDDocument,
+  ResearchDocument,
 } from "@/lib/types";
 
-// Extracts quantitative observations from a research artifact and structures
-// them as DerivedMetric records. Runs at research ingestion time and again
-// when the user clicks "Re-extract metrics" on the research detail page.
+// Extracts quantitative observations from research / PRD / memo documents
+// and structures them as DerivedMetric records. Runs at document ingestion
+// time and again when the user clicks "Re-extract metrics".
+//
+// Three entry points (one per source kind) share the EXTRACT_TOOL schema
+// and the finalize pipeline but use kind-specific prompts because the
+// framing differs: research observes, PRDs target, memos assert.
 
 const DEFAULT_MODEL = "claude-sonnet-4-6";
-const MAX_RESEARCH_CHARS = 24_000;
+const MAX_BODY_CHARS = 24_000;
 
-export interface ExtractMetricsInput {
-  research: ResearchArtifact;
-  businessUnits: BusinessUnit[];
-}
-
-const SYSTEM_PROMPT = `You are a research analyst extracting quantitative observations from internal research artifacts. Your job is to find every numeric claim or trend statement in the artifact and structure it so it can be tracked across the team's BU dashboards.
-
-Rules:
-
-1. ONLY extract claims that are actually in the artifact. Do not invent numbers, percentages, or trends. If the artifact has no quantitative claims, return an empty list. Fabricated metrics destroy the user's credibility with their stakeholders.
-
-2. Extract metrics, not anecdotes. A metric has a name (what is being measured), a value or direction, and a period. "Some users complained" is not a metric. "Adoption fell 32% over Q1" is.
-
-3. Each metric gets:
-   - name: canonical name that another researcher would naturally pick if they were describing the same metric (e.g. "AI Agent builder weekly active users", not "the agent thing"). Lowercase the first word unless it's a proper noun. No trailing period.
-   - kind: which category — engagement / adoption / retention / satisfaction / performance / revenue / support / other.
-   - unit: "%", "users", "days", "$", "score", etc. Empty if not stated.
-   - value: the headline number if stated (e.g. 4200 active users). null if only a direction is given.
-   - changeDirection: up / down / flat / unknown.
-   - changeMagnitude: size of the change. For "down 32%", magnitude is 32. Omit if only direction is stated.
-   - changeUnit: pct / absolute / ratio.
-   - sentiment: is this direction good or bad for the business? Use judgment — a 32% drop in usage is negative, a 32% drop in support volume is positive.
-   - periodLabel: how the artifact describes the time frame ("April 2026", "last quarter", "Q1 2026"). If unstated, use "as observed".
-   - businessUnitId: pick from the provided BU list. Use the BU whose scope this metric clearly belongs to (e.g. "AI Agent Studio usage" → the AI Platform BU). If no BU fits well, omit.
-   - evidenceQuote: the verbatim sentence or short passage from the artifact that contains the metric. Required when possible — this is how the team verifies the claim.
-
-4. Be conservative with quantity. Six precise, defensible metrics is better than fifteen shaky ones. If you would have to stretch a claim into a metric shape, skip it.
-
-5. Use canonical metric names so cross-research dedup works. If two research artifacts both say "AI Agent builder weekly active users", they should produce metrics with the same \`name\` so the dashboard can collapse them into a trend.
-
-Output via the extract_metrics tool. No prose outside the tool call.`;
+// ─── Shared schema + helpers ────────────────────────────────────────────
 
 const EXTRACT_TOOL = {
   name: "extract_metrics",
   description:
-    "Submit the list of quantitative metrics extracted from the research artifact.",
+    "Submit the list of quantitative metrics extracted from the document.",
   input_schema: {
     type: "object",
     properties: {
@@ -96,13 +70,7 @@ const EXTRACT_TOOL = {
             businessUnitId: { type: "string" },
             evidenceQuote: { type: "string" },
           },
-          required: [
-            "name",
-            "kind",
-            "changeDirection",
-            "sentiment",
-            "periodLabel",
-          ],
+          required: ["name", "kind", "changeDirection", "sentiment"],
         },
       },
     },
@@ -134,53 +102,26 @@ function serializeBUList(bus: BusinessUnit[]): string {
     .join("\n");
 }
 
-function buildResearchBlock(r: ResearchArtifact): string {
-  const trimmed =
-    r.content.length > MAX_RESEARCH_CHARS
-      ? r.content.slice(0, MAX_RESEARCH_CHARS) +
-        `\n\n[…truncated from ${r.content.length} chars]`
-      : r.content;
-  const meta: string[] = [];
-  if (r.source) meta.push(`Source: ${r.source}`);
-  if (r.conductedAt) meta.push(`Conducted: ${r.conductedAt}`);
-  if (r.methodology) meta.push(`Methodology: ${r.methodology}`);
-  return `# Research artifact: ${r.title}
-${meta.join("\n")}
-
-Executive summary: ${r.summary}
-
-Full body:
-${trimmed}`;
+function truncate(text: string): string {
+  if (text.length <= MAX_BODY_CHARS) return text;
+  return text.slice(0, MAX_BODY_CHARS) + `\n\n[…truncated from ${text.length} chars]`;
 }
 
-export async function extractMetricsFromResearch(
-  input: ExtractMetricsInput,
-): Promise<DerivedMetric[]> {
+async function runExtract(
+  systemPrompt: string,
+  userBlocks: Anthropic.Messages.ContentBlockParam[],
+  maxTokens: number,
+): Promise<ExtractedMetricRaw[]> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    return mockExtract(input);
-  }
-
+  if (!apiKey) throw new Error("ANTHROPIC_API_KEY not set");
   const client = new Anthropic({ apiKey, maxRetries: 2 });
-  const userContent: Anthropic.Messages.ContentBlockParam[] = [
-    {
-      type: "text",
-      text: `# Business unit roster\n\n${serializeBUList(input.businessUnits)}`,
-    },
-    { type: "text", text: buildResearchBlock(input.research) },
-    {
-      type: "text",
-      text: "Now call extract_metrics with the list of metrics you found. Empty list is fine if the artifact has no numeric claims.",
-    },
-  ];
-
   const stream = client.messages.stream({
     model: DEFAULT_MODEL,
-    max_tokens: 6000,
-    system: SYSTEM_PROMPT,
+    max_tokens: maxTokens,
+    system: systemPrompt,
     tools: [EXTRACT_TOOL as unknown as Anthropic.Messages.Tool],
     tool_choice: { type: "tool", name: EXTRACT_TOOL.name },
-    messages: [{ role: "user", content: userContent }],
+    messages: [{ role: "user", content: userBlocks }],
   });
   const final = await stream.finalMessage();
   const toolBlock = final.content.find(
@@ -192,21 +133,142 @@ export async function extractMetricsFromResearch(
     );
   }
   const raw = (toolBlock.input as { metrics?: ExtractedMetricRaw[] }).metrics;
-  if (!Array.isArray(raw)) return [];
-
-  return finalize(raw, input, "anthropic");
+  return Array.isArray(raw) ? raw : [];
 }
 
-function finalize(
+function newMetricId(i: number): string {
+  return `met_${Date.now().toString(36)}_${i}_${Math.random().toString(36).slice(2, 6)}`;
+}
+
+function regexFallback(text: string): {
+  subject: string;
+  direction: MetricChangeDirection;
+  magnitude: number;
+  sentence: string;
+}[] {
+  const out: {
+    subject: string;
+    direction: MetricChangeDirection;
+    magnitude: number;
+    sentence: string;
+  }[] = [];
+  const pctRe = /([A-Z][^.]{6,80}?)(\b(?:up|down|fell|rose|grew|dropped|declined|increased|decreased)\b)[^.]{0,40}?(\d{1,3})\s*%/gi;
+  let m: RegExpExecArray | null;
+  while ((m = pctRe.exec(text)) !== null && out.length < 6) {
+    const dir = /down|fell|dropped|declined|decreased/i.test(m[2])
+      ? "down"
+      : "up";
+    out.push({
+      subject: m[1].trim(),
+      direction: dir as MetricChangeDirection,
+      magnitude: Number(m[3]),
+      sentence: m[0],
+    });
+  }
+  return out;
+}
+
+// ─── Public entry point ─────────────────────────────────────────────────
+// One function for all three source kinds. Dispatches to the right prompt
+// + block builder + finalizer based on doc.kind.
+
+import type { Document } from "@/lib/types";
+
+export async function extractMetricsFromDocument(
+  doc: ResearchDocument | PRDDocument | MemoDocument,
+  businessUnits: BusinessUnit[],
+): Promise<DerivedMetric[]> {
+  if (doc.kind === "research") {
+    return extractMetricsFromResearch({ research: doc, businessUnits });
+  }
+  if (doc.kind === "prd") {
+    return extractMetricsFromPRD({ prd: doc, businessUnits });
+  }
+  return extractMetricsFromMemo({ memo: doc, businessUnits });
+}
+
+// ─── Research ───────────────────────────────────────────────────────────
+
+const RESEARCH_SYSTEM_PROMPT = `You are a research analyst extracting quantitative observations from internal research artifacts. Your job is to find every numeric claim or trend statement in the artifact and structure it so it can be tracked across the team's BU dashboards.
+
+Rules:
+
+1. ONLY extract claims that are actually in the artifact. Do not invent numbers, percentages, or trends. If the artifact has no quantitative claims, return an empty list.
+
+2. Extract metrics, not anecdotes. A metric has a name (what is being measured), a value or direction, and a period. "Some users complained" is not a metric. "Adoption fell 32% over Q1" is.
+
+3. Each metric gets:
+   - name: canonical name another researcher would naturally pick (e.g. "AI Agent builder weekly active users", not "the agent thing"). Lowercase first word unless proper noun. No trailing period.
+   - kind: engagement / adoption / retention / satisfaction / performance / revenue / support / other.
+   - unit: "%", "users", "days", "$", "score", etc. Empty if not stated.
+   - value: headline number if stated. null if only a direction.
+   - changeDirection: up / down / flat / unknown.
+   - changeMagnitude: size of the change. Omit if only direction is stated.
+   - changeUnit: pct / absolute / ratio.
+   - sentiment: positive / negative / neutral relative to the business.
+   - periodLabel: "April 2026" / "last quarter" / "Q1 2026". Default to "as observed".
+   - businessUnitId: pick from the provided BU list. Omit if no BU fits.
+   - evidenceQuote: verbatim sentence from the artifact. Required when possible.
+
+4. Be conservative. Six precise, defensible metrics is better than fifteen shaky ones.
+
+5. Canonical metric names enable cross-document dedup. Use names that would naturally collide if two artifacts measure the same thing.
+
+Output via the extract_metrics tool. No prose outside the tool call.`;
+
+function buildResearchBlock(d: ResearchDocument): string {
+  const meta: string[] = [];
+  if (d.source) meta.push(`Source: ${d.source}`);
+  if (d.properties.conductedAt)
+    meta.push(`Conducted: ${d.properties.conductedAt}`);
+  if (d.properties.methodology)
+    meta.push(`Methodology: ${d.properties.methodology}`);
+  return `# Research artifact: ${d.title}
+${meta.join("\n")}
+
+Executive summary: ${d.summary}
+
+Full body:
+${truncate(d.content)}`;
+}
+
+export interface ExtractMetricsInput {
+  research: ResearchDocument;
+  businessUnits: BusinessUnit[];
+}
+
+export async function extractMetricsFromResearch(
+  input: ExtractMetricsInput,
+): Promise<DerivedMetric[]> {
+  if (!process.env.ANTHROPIC_API_KEY) return mockResearchExtract(input);
+  const raw = await runExtract(
+    RESEARCH_SYSTEM_PROMPT,
+    [
+      {
+        type: "text",
+        text: `# Business unit roster\n\n${serializeBUList(input.businessUnits)}`,
+      },
+      { type: "text", text: buildResearchBlock(input.research) },
+      {
+        type: "text",
+        text: "Now call extract_metrics with the list of metrics you found. Empty list is fine if the artifact has no numeric claims.",
+      },
+    ],
+    6000,
+  );
+  return finalizeResearch(raw, input, "anthropic");
+}
+
+function finalizeResearch(
   raw: ExtractedMetricRaw[],
   input: ExtractMetricsInput,
   generatedBy: "anthropic" | "mock",
 ): DerivedMetric[] {
   const buIds = new Set(input.businessUnits.map((b) => b.id));
   const now = new Date().toISOString();
-  const asOfDate = input.research.conductedAt;
+  const asOfDate = input.research.properties.conductedAt;
   return raw.map((m, i) => ({
-    id: `met_${Date.now().toString(36)}_${i}_${Math.random().toString(36).slice(2, 6)}`,
+    id: newMetricId(i),
     name: m.name.trim(),
     kind: m.kind,
     unit: m.unit?.trim() || undefined,
@@ -232,15 +294,27 @@ function finalize(
   }));
 }
 
-// ─── PRD extraction ─────────────────────────────────────────────────────────
-// PRDs state TARGET metrics, not observed trends. We reuse the same extractor
-// shape but flip the framing in the prompt and tag results as observationType
-// "target" so the BU dashboard can display them alongside observed values.
-
-export interface ExtractPRDMetricsInput {
-  prd: PRD;
-  businessUnits: BusinessUnit[];
+function mockResearchExtract(input: ExtractMetricsInput): DerivedMetric[] {
+  const raw: ExtractedMetricRaw[] = regexFallback(input.research.content).map(
+    (h) => ({
+      name: h.subject.toLowerCase(),
+      kind: "engagement",
+      unit: "%",
+      changeDirection: h.direction,
+      changeMagnitude: h.magnitude,
+      changeUnit: "pct",
+      sentiment: h.direction === "down" ? "negative" : "positive",
+      periodLabel: input.research.properties.conductedAt ?? "as observed",
+      businessUnitId: input.businessUnits[0]?.id,
+      evidenceQuote: h.sentence,
+    }),
+  );
+  return finalizeResearch(raw, input, "mock");
 }
+
+// ─── PRD ────────────────────────────────────────────────────────────────
+// PRDs state TARGET metrics, not observed trends. Same schema, flipped
+// framing; results tagged observationType="target".
 
 const PRD_SYSTEM_PROMPT = `You are a product operations specialist extracting TARGET metrics from a PRD (product requirements document). Inputs:
 - A PRD with a problem, solution, target users, success metrics, and body.
@@ -248,102 +322,81 @@ const PRD_SYSTEM_PROMPT = `You are a product operations specialist extracting TA
 
 Rules:
 
-1. ONLY extract metrics that are explicitly stated as TARGETS in the PRD. Do not invent. If the PRD has no quantitative targets, return an empty list.
+1. ONLY extract metrics that are explicitly stated as TARGETS in the PRD. If the PRD has no quantitative targets, return an empty list.
 
-2. Use canonical metric names that would naturally collide with research-observed metrics on the BU dashboard. If the PRD targets "30% adoption within 90 days" and research observes "AI Agent Studio adoption", the metric name in BOTH should be "AI Agent Studio adoption" (or your canonical equivalent). This is critical — same canonical name = same row on the dashboard.
+2. Use canonical metric names that would naturally collide with research-observed metrics on the BU dashboard. Same canonical name = same row.
 
 3. For each metric:
-   - name: canonical name (lowercase first word unless proper noun, no trailing period).
+   - name: canonical name (lowercase first word, no trailing period).
    - kind: engagement / adoption / retention / satisfaction / performance / revenue / support / other.
-   - unit: "%", "users", "days", "$", etc.
-   - value: the target value (e.g. 30 for "30% adoption"). Required when stated.
-   - changeDirection: usually "up" for a target you want to grow toward, "down" if the target is reducing something (errors, churn, latency).
-   - changeMagnitude: omit unless the PRD states a delta target (e.g. "improve adoption by 10 points").
+   - unit: "%", "users", "days", "$".
+   - value: the target value. Required when stated.
+   - changeDirection: usually "up" toward growth, "down" for reductions (errors, churn, latency).
+   - changeMagnitude: omit unless the PRD states a delta target ("improve by 10 points").
    - changeUnit: pct / absolute / ratio.
    - sentiment: "positive" — achieving the target is by definition positive.
-   - periodLabel: how the PRD describes the target window ("within 90 days", "by ship + 30d", "Q3 2026"). Required.
+   - periodLabel: "within 90 days" / "by ship + 30d" / "Q3 2026". Required.
    - businessUnitId: pick from the BU list. Use the PRD's linked BU when present.
-   - evidenceQuote: the verbatim sentence stating this target. Required where possible.
+   - evidenceQuote: verbatim sentence stating this target. Required where possible.
 
 4. Be conservative. Six precise targets beats fifteen shaky ones.
 
 Output via the extract_metrics tool. No prose outside the tool call.`;
 
-function buildPRDBlock(p: PRD): string {
-  const trimmed =
-    p.content.length > MAX_RESEARCH_CHARS
-      ? p.content.slice(0, MAX_RESEARCH_CHARS) +
-        `\n\n[…truncated from ${p.content.length} chars]`
-      : p.content;
+function buildPRDBlock(d: PRDDocument): string {
   const meta: string[] = [];
-  if (p.source) meta.push(`Owner: ${p.source}`);
-  if (p.status) meta.push(`Status: ${p.status}`);
-  if (p.targetShipDate) meta.push(`Target ship: ${p.targetShipDate}`);
-  if (p.linkedBusinessUnitId)
-    meta.push(`Linked BU id: ${p.linkedBusinessUnitId}`);
-  return `# PRD: ${p.title}
+  if (d.source) meta.push(`Owner: ${d.source}`);
+  meta.push(`Status: ${d.properties.status}`);
+  if (d.properties.targetShipDate)
+    meta.push(`Target ship: ${d.properties.targetShipDate}`);
+  if (d.linkedBusinessUnitId)
+    meta.push(`Linked BU id: ${d.linkedBusinessUnitId}`);
+  return `# PRD: ${d.title}
 ${meta.join("\n")}
 
-Executive summary: ${p.summary}
+Executive summary: ${d.summary}
 
-Problem: ${p.problem}
+Problem: ${d.properties.problem}
 
-Proposed solution: ${p.solution}
+Proposed solution: ${d.properties.solution}
 
-Target users: ${p.targetUsers.join(", ") || "(unstated)"}
+Target users: ${d.properties.targetUsers.join(", ") || "(unstated)"}
 
 Stated success metrics:
-${p.successMetrics.map((s) => `- ${s}`).join("\n") || "(none stated)"}
+${d.properties.successMetrics.map((s) => `- ${s}`).join("\n") || "(none stated)"}
 
 Full body:
-${trimmed}`;
+${truncate(d.content)}`;
+}
+
+export interface ExtractPRDMetricsInput {
+  prd: PRDDocument;
+  businessUnits: BusinessUnit[];
 }
 
 export async function extractMetricsFromPRD(
   input: ExtractPRDMetricsInput,
 ): Promise<DerivedMetric[]> {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    return mockExtractFromPRD(input);
-  }
-
-  const client = new Anthropic({ apiKey, maxRetries: 2 });
-  const userContent: Anthropic.Messages.ContentBlockParam[] = [
-    {
-      type: "text",
-      text: `# Business unit roster\n\n${serializeBUList(input.businessUnits)}`,
-    },
-    { type: "text", text: buildPRDBlock(input.prd) },
-    {
-      type: "text",
-      text: "Now call extract_metrics with the TARGET metrics stated in this PRD.",
-    },
-  ];
-
-  const stream = client.messages.stream({
-    model: DEFAULT_MODEL,
-    max_tokens: 4000,
-    system: PRD_SYSTEM_PROMPT,
-    tools: [EXTRACT_TOOL as unknown as Anthropic.Messages.Tool],
-    tool_choice: { type: "tool", name: EXTRACT_TOOL.name },
-    messages: [{ role: "user", content: userContent }],
-  });
-  const final = await stream.finalMessage();
-  const toolBlock = final.content.find(
-    (b): b is Anthropic.Messages.ToolUseBlock => b.type === "tool_use",
+  if (!process.env.ANTHROPIC_API_KEY) return mockPRDExtract(input);
+  const raw = await runExtract(
+    PRD_SYSTEM_PROMPT,
+    [
+      {
+        type: "text",
+        text: `# Business unit roster\n\n${serializeBUList(input.businessUnits)}`,
+      },
+      { type: "text", text: buildPRDBlock(input.prd) },
+      {
+        type: "text",
+        text: "Now call extract_metrics with the TARGET metrics stated in this PRD.",
+      },
+    ],
+    4000,
   );
-  if (!toolBlock) {
-    throw new Error(
-      `PRD extractor did not return a tool_use block (stop_reason=${final.stop_reason}).`,
-    );
-  }
-  const raw = (toolBlock.input as { metrics?: ExtractedMetricRaw[] }).metrics;
-  if (!Array.isArray(raw)) return [];
-
-  return finalizeForPRD(raw, input, "anthropic");
+  return finalizePRD(raw, input, "anthropic");
 }
 
-function finalizeForPRD(
+function finalizePRD(
   raw: ExtractedMetricRaw[],
   input: ExtractPRDMetricsInput,
   generatedBy: "anthropic" | "mock",
@@ -351,7 +404,7 @@ function finalizeForPRD(
   const buIds = new Set(input.businessUnits.map((b) => b.id));
   const now = new Date().toISOString();
   return raw.map((m, i) => ({
-    id: `met_${Date.now().toString(36)}_${i}_${Math.random().toString(36).slice(2, 6)}`,
+    id: newMetricId(i),
     name: m.name.trim(),
     kind: m.kind,
     unit: m.unit?.trim() || undefined,
@@ -363,7 +416,7 @@ function finalizeForPRD(
     sentiment: m.sentiment,
     observationType: "target",
     periodLabel: m.periodLabel || "target",
-    asOfDate: input.prd.targetShipDate,
+    asOfDate: input.prd.properties.targetShipDate,
     sourceKind: "prd",
     sourceDocumentId: input.prd.id,
     businessUnitId:
@@ -377,11 +430,9 @@ function finalizeForPRD(
   }));
 }
 
-function mockExtractFromPRD(input: ExtractPRDMetricsInput): DerivedMetric[] {
-  // Use the explicit successMetrics strings as the source. Parse one number
-  // out of each string if possible.
+function mockPRDExtract(input: ExtractPRDMetricsInput): DerivedMetric[] {
   const out: ExtractedMetricRaw[] = [];
-  for (const s of input.prd.successMetrics.slice(0, 6)) {
+  for (const s of input.prd.properties.successMetrics.slice(0, 6)) {
     const numMatch = s.match(/(\d{1,4})\s*(%|x|days|users|seconds|ms|\$)?/i);
     const value = numMatch ? Number(numMatch[1]) : undefined;
     const unit = numMatch?.[2];
@@ -394,99 +445,67 @@ function mockExtractFromPRD(input: ExtractPRDMetricsInput): DerivedMetric[] {
       changeDirection: isReduction ? "down" : "up",
       changeUnit: unit === "%" ? "pct" : "absolute",
       sentiment: "positive",
-      periodLabel: input.prd.targetShipDate ?? "target",
+      periodLabel: input.prd.properties.targetShipDate ?? "target",
       businessUnitId: input.prd.linkedBusinessUnitId,
       evidenceQuote: s,
     });
   }
-  return finalizeForPRD(out, input, "mock");
+  return finalizePRD(out, input, "mock");
 }
 
-// ─── Memo extraction ────────────────────────────────────────────────────────
-// Memos can contain metric-shaped claims too — strategy memos cite numbers,
-// post-mortems quantify regressions, market notes report competitor figures.
-// Treat extracted metrics from memos as observed (the memo asserts them as
-// fact); the BU dashboard groups by canonical name regardless of source.
+// ─── Memo ────────────────────────────────────────────────────────────────
+// Memos surface observed metrics in the same shape as research; framing
+// differs but the system prompt is reusable.
 
-export interface ExtractMemoMetricsInput {
-  memo: Memo;
-  businessUnits: BusinessUnit[];
-}
-
-function buildMemoBlock(m: Memo): string {
-  const trimmed =
-    m.content.length > MAX_RESEARCH_CHARS
-      ? m.content.slice(0, MAX_RESEARCH_CHARS) +
-        `\n\n[…truncated from ${m.content.length} chars]`
-      : m.content;
+function buildMemoBlock(d: MemoDocument): string {
   const meta: string[] = [];
-  if (m.source) meta.push(`Author: ${m.source}`);
-  if (m.memoKind) meta.push(`Kind: ${m.memoKind}`);
-  if (m.linkedBusinessUnitId)
-    meta.push(`Linked BU id: ${m.linkedBusinessUnitId}`);
-  return `# Memo: ${m.title}
+  if (d.source) meta.push(`Author: ${d.source}`);
+  meta.push(`Kind: ${d.properties.memoKind}`);
+  if (d.linkedBusinessUnitId)
+    meta.push(`Linked BU id: ${d.linkedBusinessUnitId}`);
+  return `# Memo: ${d.title}
 ${meta.join("\n")}
 
-Summary: ${m.summary}
+Summary: ${d.summary}
 
 Key claims:
-${m.keyClaims.map((c) => `- ${c}`).join("\n") || "(none stated)"}
+${d.properties.keyClaims.map((c) => `- ${c}`).join("\n") || "(none stated)"}
 
 Decisions:
-${m.decisions.map((d) => `- ${d}`).join("\n") || "(none stated)"}
+${d.properties.decisions.map((dec) => `- ${dec}`).join("\n") || "(none stated)"}
 
 Full body:
-${trimmed}`;
+${truncate(d.content)}`;
+}
+
+export interface ExtractMemoMetricsInput {
+  memo: MemoDocument;
+  businessUnits: BusinessUnit[];
 }
 
 export async function extractMetricsFromMemo(
   input: ExtractMemoMetricsInput,
 ): Promise<DerivedMetric[]> {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    return mockExtractFromMemo(input);
-  }
-
-  const client = new Anthropic({ apiKey, maxRetries: 2 });
-  const userContent: Anthropic.Messages.ContentBlockParam[] = [
-    {
-      type: "text",
-      text: `# Business unit roster\n\n${serializeBUList(input.businessUnits)}`,
-    },
-    { type: "text", text: buildMemoBlock(input.memo) },
-    {
-      type: "text",
-      text: "Now call extract_metrics with any quantitative observations the memo asserts. Empty list is fine if the memo has no numeric claims.",
-    },
-  ];
-
-  const stream = client.messages.stream({
-    model: DEFAULT_MODEL,
-    max_tokens: 4000,
-    // Reuse the research extractor's system prompt — memos surface observed
-    // metrics in the same shape as research; only the framing differs and
-    // the LLM handles that from context.
-    system: SYSTEM_PROMPT,
-    tools: [EXTRACT_TOOL as unknown as Anthropic.Messages.Tool],
-    tool_choice: { type: "tool", name: EXTRACT_TOOL.name },
-    messages: [{ role: "user", content: userContent }],
-  });
-  const final = await stream.finalMessage();
-  const toolBlock = final.content.find(
-    (b): b is Anthropic.Messages.ToolUseBlock => b.type === "tool_use",
+  if (!process.env.ANTHROPIC_API_KEY) return mockMemoExtract(input);
+  const raw = await runExtract(
+    RESEARCH_SYSTEM_PROMPT,
+    [
+      {
+        type: "text",
+        text: `# Business unit roster\n\n${serializeBUList(input.businessUnits)}`,
+      },
+      { type: "text", text: buildMemoBlock(input.memo) },
+      {
+        type: "text",
+        text: "Now call extract_metrics with any quantitative observations the memo asserts. Empty list is fine if the memo has no numeric claims.",
+      },
+    ],
+    4000,
   );
-  if (!toolBlock) {
-    throw new Error(
-      `Memo extractor did not return a tool_use block (stop_reason=${final.stop_reason}).`,
-    );
-  }
-  const raw = (toolBlock.input as { metrics?: ExtractedMetricRaw[] }).metrics;
-  if (!Array.isArray(raw)) return [];
-
-  return finalizeForMemo(raw, input, "anthropic");
+  return finalizeMemo(raw, input, "anthropic");
 }
 
-function finalizeForMemo(
+function finalizeMemo(
   raw: ExtractedMetricRaw[],
   input: ExtractMemoMetricsInput,
   generatedBy: "anthropic" | "mock",
@@ -494,7 +513,7 @@ function finalizeForMemo(
   const buIds = new Set(input.businessUnits.map((b) => b.id));
   const now = new Date().toISOString();
   return raw.map((m, i) => ({
-    id: `met_${Date.now().toString(36)}_${i}_${Math.random().toString(36).slice(2, 6)}`,
+    id: newMetricId(i),
     name: m.name.trim(),
     kind: m.kind,
     unit: m.unit?.trim() || undefined,
@@ -520,61 +539,21 @@ function finalizeForMemo(
   }));
 }
 
-function mockExtractFromMemo(input: ExtractMemoMetricsInput): DerivedMetric[] {
-  const text = input.memo.content;
-  const out: ExtractedMetricRaw[] = [];
-  const pctRe = /([A-Z][^.]{6,80}?)(\b(?:up|down|fell|rose|grew|dropped|declined|increased|decreased)\b)[^.]{0,40}?(\d{1,3})\s*%/gi;
-  let m: RegExpExecArray | null;
-  while ((m = pctRe.exec(text)) !== null && out.length < 6) {
-    const sentence = m[0];
-    const subject = m[1].trim();
-    const dir = /down|fell|dropped|declined|decreased/i.test(m[2])
-      ? "down"
-      : "up";
-    const mag = Number(m[3]);
-    out.push({
-      name: subject.toLowerCase(),
+function mockMemoExtract(input: ExtractMemoMetricsInput): DerivedMetric[] {
+  const raw: ExtractedMetricRaw[] = regexFallback(input.memo.content).map(
+    (h) => ({
+      name: h.subject.toLowerCase(),
       kind: "engagement",
       unit: "%",
-      changeDirection: dir as MetricChangeDirection,
-      changeMagnitude: mag,
+      changeDirection: h.direction,
+      changeMagnitude: h.magnitude,
       changeUnit: "pct",
-      sentiment: dir === "down" ? "negative" : "positive",
+      sentiment: h.direction === "down" ? "negative" : "positive",
       periodLabel: "as asserted",
-      businessUnitId: input.memo.linkedBusinessUnitId ?? input.businessUnits[0]?.id,
-      evidenceQuote: sentence,
-    });
-  }
-  return finalizeForMemo(out, input, "mock");
-}
-
-// Lightweight mock for when ANTHROPIC_API_KEY isn't set. Heuristically pulls
-// out any "<number>%" / "<number>x" pattern with a surrounding sentence so
-// the demo arc still produces something on the BU dashboard.
-function mockExtract(input: ExtractMetricsInput): DerivedMetric[] {
-  const text = input.research.content;
-  const out: ExtractedMetricRaw[] = [];
-  const pctRe = /([A-Z][^.]{6,80}?)(\b(?:up|down|fell|rose|grew|dropped|declined|increased|decreased)\b)[^.]{0,40}?(\d{1,3})\s*%/gi;
-  let m: RegExpExecArray | null;
-  while ((m = pctRe.exec(text)) !== null && out.length < 6) {
-    const sentence = m[0];
-    const subject = m[1].trim();
-    const dir = /down|fell|dropped|declined|decreased/i.test(m[2])
-      ? "down"
-      : "up";
-    const mag = Number(m[3]);
-    out.push({
-      name: subject.toLowerCase(),
-      kind: "engagement",
-      unit: "%",
-      changeDirection: dir as MetricChangeDirection,
-      changeMagnitude: mag,
-      changeUnit: "pct",
-      sentiment: dir === "down" ? "negative" : "positive",
-      periodLabel: input.research.conductedAt ?? "as observed",
-      businessUnitId: input.businessUnits[0]?.id,
-      evidenceQuote: sentence,
-    });
-  }
-  return finalize(out, input, "mock");
+      businessUnitId:
+        input.memo.linkedBusinessUnitId ?? input.businessUnits[0]?.id,
+      evidenceQuote: h.sentence,
+    }),
+  );
+  return finalizeMemo(raw, input, "mock");
 }

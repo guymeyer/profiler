@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useRef } from "react";
+import { useRouter } from "next/navigation";
 import { createRoot, type Root } from "react-dom/client";
 import { useEditor, EditorContent, ReactRenderer } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
@@ -11,6 +12,7 @@ import { Markdown } from "tiptap-markdown";
 
 import {
   MentionList,
+  hrefForEntity,
   type EntityChoice,
   type MentionListRef,
 } from "@/components/rich-editor/mention-list";
@@ -43,6 +45,31 @@ export function RichEditor({
     entitiesRef.current = entities;
   }, [entities]);
 
+  const router = useRouter();
+  const wrapperRef = useRef<HTMLDivElement>(null);
+
+  // ProseMirror swallows plain clicks for caret placement, so a mention
+  // chip rendered as <a> won't navigate by default in edit mode. Catch
+  // clicks on chips here and route through Next.js. Mod-click (cmd/ctrl)
+  // and middle-click still fall through to native open-in-new-tab.
+  useEffect(() => {
+    const el = wrapperRef.current;
+    if (!el) return;
+    function onClick(e: MouseEvent) {
+      if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+      const target = e.target as HTMLElement | null;
+      const link = target?.closest<HTMLAnchorElement>("a[data-mention-id]");
+      if (!link) return;
+      const href = link.getAttribute("href");
+      if (!href) return;
+      e.preventDefault();
+      e.stopPropagation();
+      router.push(href);
+    }
+    el.addEventListener("click", onClick);
+    return () => el.removeEventListener("click", onClick);
+  }, [router]);
+
   const editor = useEditor({
     immediatelyRender: false,
     editable: !readOnly,
@@ -70,12 +97,30 @@ export function RichEditor({
         renderHTML({ options, node }) {
           const id = (node.attrs as { id?: string }).id ?? "";
           const label = (node.attrs as { label?: string }).label ?? id;
+          // Look up the entity's kind from the live picker corpus so a
+          // mention chip becomes a real clickable link to the right detail
+          // page. If the entity is gone (deleted, renamed) we render an
+          // un-linked span so the chip still styles correctly.
+          const found = entitiesRef.current.find((e) => e.id === id);
+          const baseAttrs = {
+            ...options.HTMLAttributes,
+            "data-mention-id": id,
+            "data-mention-label": label,
+            "data-mention-kind": found?.kind ?? "",
+          };
+          if (!found) {
+            return ["span", baseAttrs, `@${label}`];
+          }
           return [
-            "span",
+            "a",
             {
-              ...options.HTMLAttributes,
-              "data-mention-id": id,
-              "data-mention-label": label,
+              ...baseAttrs,
+              href: hrefForEntity(found.kind, id),
+              // The editor consumes pointer events for caret placement —
+              // mod-click (cmd/ctrl) opens the link in a new tab without
+              // fighting the editor. Plain click stays editable.
+              target: "_self",
+              rel: "noopener",
             },
             `@${label}`,
           ];
@@ -110,7 +155,7 @@ export function RichEditor({
   }, [editor, initialMarkdown]);
 
   return (
-    <div className={cn("rich-editor", className)}>
+    <div ref={wrapperRef} className={cn("rich-editor", className)}>
       <EditorContent editor={editor} />
     </div>
   );

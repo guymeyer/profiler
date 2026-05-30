@@ -1,11 +1,11 @@
 "use server";
 import Anthropic from "@anthropic-ai/sdk";
 import type {
-  PRD,
+  MicrositeDocument,
+  PRDDocument,
   Person,
   PersonLensSection,
-  ResearchArtifact,
-  Synthesis,
+  ResearchDocument,
   SynthesisOutline,
 } from "@/lib/types";
 import { SYNTHESIS_LENSES } from "@/lib/types";
@@ -26,10 +26,10 @@ const MAX_REPORT_CHARS = 18_000;
 
 export interface SynthesizeInput {
   title?: string;
-  research: ResearchArtifact[];
+  research: ResearchDocument[];
   // Optional PRDs to fold into the corpus as "planned intent" (vs research,
   // which is observation). Treated as a sibling input to research.
-  prds?: PRD[];
+  prds?: PRDDocument[];
   // Optional people to include as microscopic lenses. Empty / omitted =
   // functional lenses only (the original behavior).
   people?: Person[];
@@ -197,7 +197,7 @@ function buildOutlineTool(personIds: string[]): Anthropic.Messages.Tool {
   };
 }
 
-function serializePRD(p: PRD): string {
+function serializePRD(p: PRDDocument): string {
   const trimmed =
     p.content.length > MAX_REPORT_CHARS
       ? p.content.slice(0, MAX_REPORT_CHARS) +
@@ -205,27 +205,28 @@ function serializePRD(p: PRD): string {
       : p.content;
   const meta: string[] = [];
   if (p.source) meta.push(`Owner: ${p.source}`);
-  if (p.status) meta.push(`Status: ${p.status}`);
-  if (p.targetShipDate) meta.push(`Target ship: ${p.targetShipDate}`);
+  meta.push(`Status: ${p.properties.status}`);
+  if (p.properties.targetShipDate)
+    meta.push(`Target ship: ${p.properties.targetShipDate}`);
   return `### PRD: ${p.title}
 ${meta.join("\n")}
 
 Summary: ${p.summary}
 
-Problem: ${p.problem}
+Problem: ${p.properties.problem}
 
-Proposed solution: ${p.solution}
+Proposed solution: ${p.properties.solution}
 
-Target users: ${p.targetUsers.join(", ") || "(unstated)"}
+Target users: ${p.properties.targetUsers.join(", ") || "(unstated)"}
 
 Stated success metrics:
-${p.successMetrics.map((s) => `- ${s}`).join("\n") || "(none stated)"}
+${p.properties.successMetrics.map((s) => `- ${s}`).join("\n") || "(none stated)"}
 
 Full body:
 ${trimmed}`;
 }
 
-function serializeReport(r: ResearchArtifact): string {
+function serializeReport(r: ResearchDocument): string {
   const trimmed =
     r.content.length > MAX_REPORT_CHARS
       ? r.content.slice(0, MAX_REPORT_CHARS) +
@@ -233,10 +234,12 @@ function serializeReport(r: ResearchArtifact): string {
       : r.content;
   const meta: string[] = [];
   if (r.source) meta.push(`Source: ${r.source}`);
-  if (r.conductedAt) meta.push(`Conducted: ${r.conductedAt}`);
-  if (r.methodology) meta.push(`Methodology: ${r.methodology}`);
-  if (r.participants.length > 0)
-    meta.push(`Participants: ${r.participants.join(", ")}`);
+  if (r.properties.conductedAt)
+    meta.push(`Conducted: ${r.properties.conductedAt}`);
+  if (r.properties.methodology)
+    meta.push(`Methodology: ${r.properties.methodology}`);
+  if (r.properties.participants.length > 0)
+    meta.push(`Participants: ${r.properties.participants.join(", ")}`);
   return `### ${r.title}
 ${meta.join("\n")}
 
@@ -261,7 +264,7 @@ function buildPeopleRoster(people: Person[]): string {
 
 export async function synthesizeResearch(
   input: SynthesizeInput,
-): Promise<Synthesis> {
+): Promise<MicrositeDocument> {
   if (!Array.isArray(input.research) || input.research.length === 0) {
     throw new Error("Pick at least one research report to synthesize.");
   }
@@ -381,18 +384,27 @@ function finalizeSynthesis(args: {
   input: SynthesizeInput;
   generatedBy: "anthropic" | "mock";
   model?: string;
-}): Synthesis {
+}): MicrositeDocument {
   const { outline, input, generatedBy, model } = args;
   const now = new Date().toISOString();
   return {
     id: `syn_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+    kind: "microsite",
     title: outline.title,
-    researchIds: input.research.map((r) => r.id),
-    outline,
-    html: renderSynthesisHtml(outline),
-    modifier: input.modifier?.trim() || undefined,
-    generatedBy,
-    model,
+    summary: outline.overview ?? "",
+    content: "",
+    tags: [],
+    linkedPersonIds: [],
+    linkedCustomerIds: [],
+    linkedObjectiveIds: [],
     createdAt: now,
+    properties: {
+      researchIds: input.research.map((r) => r.id),
+      outline,
+      html: renderSynthesisHtml(outline),
+      modifier: input.modifier?.trim() || undefined,
+      generatedBy,
+      model,
+    },
   };
 }

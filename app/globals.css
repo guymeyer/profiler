@@ -270,7 +270,7 @@ a.link:hover,
   font-style: italic;
 }
 
-/* Mention chip — inline, restrained */
+/* Mention chip — inline, restrained, clickable (anchors). */
 .rich-editor .ProseMirror .mention-chip {
   display: inline;
   padding: 1px 4px;
@@ -281,9 +281,18 @@ a.link:hover,
   font-weight: 500;
   font-size: 0.95em;
   cursor: pointer;
+  text-decoration: none;
 }
 .rich-editor .ProseMirror .mention-chip:hover {
   background: var(--muted);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+/* Document mentions get a subtle accent so cross-doc citations read
+   distinct from people/customer mentions. */
+.rich-editor .ProseMirror .mention-chip[data-mention-kind="document"] {
+  background: color-mix(in oklab, var(--primary) 10%, transparent);
 }
 
 /* Placeholder — shown when the editor is empty */

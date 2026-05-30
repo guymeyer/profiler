@@ -20,7 +20,7 @@ import { useProfilerStore } from "@/lib/store";
 import { useEffectivePeople } from "@/lib/people-hooks";
 import { OBJECTIVES } from "@/lib/data/objectives";
 import { renderDeckHtml } from "@/lib/llm/slide-deck-render";
-import type { Slide, SlideDeck } from "@/lib/types";
+import type { DeckDocument, MicrositeDocument, Slide } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 interface Props {
@@ -30,9 +30,14 @@ interface Props {
 export default function DeckViewerPage({ params }: Props) {
   const { synthesisId, deckId } = use(params);
   const router = useRouter();
-  const deck = useProfilerStore((s) => s.decks?.[deckId]);
-  const synthesis = useProfilerStore((s) => s.syntheses?.[synthesisId]);
-  const deleteDeck = useProfilerStore((s) => s.deleteDeck);
+  const documents = useProfilerStore((s) => s.documents ?? {});
+  const deckRaw = documents[deckId];
+  const deck: DeckDocument | undefined =
+    deckRaw?.kind === "deck" ? deckRaw : undefined;
+  const synthRaw = documents[synthesisId];
+  const synthesis: MicrositeDocument | undefined =
+    synthRaw?.kind === "microsite" ? synthRaw : undefined;
+  const deleteDocument = useProfilerStore((s) => s.deleteDocument);
   const allPeople = useEffectivePeople();
 
   const [hydrated, setHydrated] = useState(false);
@@ -43,9 +48,9 @@ export default function DeckViewerPage({ params }: Props) {
   const [modifier, setModifier] = useState("");
   const [regenerating, setRegenerating] = useState(false);
   const [regenError, setRegenError] = useState<string | null>(null);
-  const saveDeck = useProfilerStore((s) => s.saveDeck);
+  const saveDocument = useProfilerStore((s) => s.saveDocument);
 
-  const slides = deck?.slides ?? [];
+  const slides = deck?.properties.slides ?? [];
   const total = slides.length;
 
   const next = useCallback(() => {
@@ -81,14 +86,14 @@ export default function DeckViewerPage({ params }: Props) {
   const audiencePeople = useMemo(
     () =>
       deck
-        ? allPeople.filter((p) => deck.audience.personIds.includes(p.id))
+        ? allPeople.filter((p) => deck.properties.audience.personIds.includes(p.id))
         : [],
     [deck, allPeople],
   );
   const audienceObjectives = useMemo(
     () =>
       deck
-        ? OBJECTIVES.filter((o) => deck.audience.objectiveIds.includes(o.id))
+        ? OBJECTIVES.filter((o) => deck.properties.audience.objectiveIds.includes(o.id))
         : [],
     [deck],
   );
@@ -113,7 +118,7 @@ export default function DeckViewerPage({ params }: Props) {
   function handleDelete() {
     if (!deck) return;
     if (!confirm("Delete this deck?")) return;
-    deleteDeck(deck.id);
+    deleteDocument(deck.id);
     router.push(`/synthesis/${synthesisId}`);
   }
 
@@ -146,17 +151,17 @@ export default function DeckViewerPage({ params }: Props) {
     setRegenerating(true);
     try {
       const audiencePeople = allPeople.filter((p) =>
-        deck.audience.personIds.includes(p.id),
+        deck.properties.audience.personIds.includes(p.id),
       );
       const audienceObjectives = OBJECTIVES.filter((o) =>
-        deck.audience.objectiveIds.includes(o.id),
+        deck.properties.audience.objectiveIds.includes(o.id),
       );
       const res = await fetch("/api/synthesis/decks/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           synthesis,
-          audience: deck.audience,
+          audience: deck.properties.audience,
           audiencePeople,
           audienceObjectives,
           modifier: modifier.trim() || undefined,
@@ -166,15 +171,15 @@ export default function DeckViewerPage({ params }: Props) {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.error ?? `Regeneration failed (${res.status}).`);
       }
-      const { deck: next } = (await res.json()) as { deck: SlideDeck };
+      const { deck: next } = (await res.json()) as { deck: DeckDocument };
       // Preserve the deck id so this is an in-place update, not a new deck.
-      const merged: SlideDeck = {
+      const merged: DeckDocument = {
         ...next,
         id: deck.id,
         createdAt: deck.createdAt,
         updatedAt: new Date().toISOString(),
       };
-      saveDeck(merged);
+      saveDocument(merged);
       setModifier("");
       setIndex(0);
     } catch (e) {

@@ -1,5 +1,7 @@
 "use client";
-import { use, useEffect, useMemo, useState } from "react";
+import { use, useMemo, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
+import { useHydrated } from "@/lib/hooks/use-hydrated";
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -42,17 +44,38 @@ interface Props {
 
 export default function BusinessUnitDashboardPage({ params }: Props) {
   const { buId } = use(params);
-  const bu = useProfilerStore((s) => s.businessUnits?.[buId]);
-  const allMetrics = useProfilerStore((s) => s.metrics ?? {});
-  const allOkrs = useProfilerStore((s) => s.okrs ?? {});
-  const documents = useProfilerStore((s) => s.documents ?? {});
-  const recSet = useProfilerStore((s) => s.buRecommendations?.[buId]);
+  // Composite selector with useShallow so the page only re-renders when
+  // the BU's actual data subset changes — not when an unrelated metric,
+  // doc, or OKR somewhere else gets touched. Filters live inside the
+  // selector so the returned arrays are stable identity-wise.
+  const { bu, allMetrics, documents, buPrds, buOkrs, recSet } = useProfilerStore(
+    useShallow((s) => {
+      const allMetrics = s.metrics ?? {};
+      const documents = s.documents ?? {};
+      const allOkrs = s.okrs ?? {};
+      return {
+        bu: s.businessUnits?.[buId],
+        allMetrics,
+        documents,
+        recSet: s.buRecommendations?.[buId],
+        buPrds: Object.values(documents)
+          .filter((d) => d.kind === "prd" && d.linkedBusinessUnitId === buId)
+          .sort(
+            (a, b) =>
+              new Date(b.createdAt).getTime() -
+              new Date(a.createdAt).getTime(),
+          ),
+        buOkrs: Object.values(allOkrs).filter(
+          (o) => o.level === "bu" && o.businessUnitId === buId,
+        ),
+      };
+    }),
+  );
   const saveBURecommendations = useProfilerStore(
     (s) => s.saveBURecommendations,
   );
 
-  const [hydrated, setHydrated] = useState(false);
-  useEffect(() => setHydrated(true), []);
+  const hydrated = useHydrated();
 
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -64,25 +87,6 @@ export default function BusinessUnitDashboardPage({ params }: Props) {
     [allMetrics, buId],
   );
   const groups = useMemo(() => groupMetrics(buMetrics), [buMetrics]);
-
-  const buPrds = useMemo(
-    () =>
-      Object.values(documents)
-        .filter((d) => d.kind === "prd" && d.linkedBusinessUnitId === buId)
-        .sort(
-          (a, b) =>
-            new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-        ),
-    [documents, buId],
-  );
-
-  const buOkrs = useMemo(
-    () =>
-      Object.values(allOkrs).filter(
-        (o) => o.level === "bu" && o.businessUnitId === buId,
-      ),
-    [allOkrs, buId],
-  );
 
   // Find which research artifacts contributed metrics to this BU.
   const sourceDocumentIds = useMemo(() => {

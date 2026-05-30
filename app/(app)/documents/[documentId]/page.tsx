@@ -1,5 +1,5 @@
 "use client";
-import { use, useEffect, useMemo, useRef, useState } from "react";
+import { use, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, redirect } from "next/navigation";
 import {
@@ -22,11 +22,7 @@ import { useEffectivePeople } from "@/lib/people-hooks";
 import { OBJECTIVES } from "@/lib/data/objectives";
 import { CopyPromptButton } from "@/components/copy-prompt-button";
 import { buildResearchPrototypePrompt } from "@/lib/prototype-prompt";
-import {
-  extractMetricsFromResearch,
-  extractMetricsFromPRD,
-  extractMetricsFromMemo,
-} from "@/lib/llm/extract-metrics";
+import { extractMetricsFromDocument } from "@/lib/llm/extract-metrics";
 import {
   METRIC_KIND_LABELS,
   type DerivedMetric,
@@ -36,7 +32,7 @@ import {
 import { PeopleRecommendations } from "@/components/people-recommendations";
 import { ReclassifyButton } from "@/components/reclassify-button";
 import { QualitySignals } from "@/components/quality-signals";
-import { RichEditor, type EntityChoice } from "@/components/rich-editor";
+import { RichEditor } from "@/components/rich-editor";
 import {
   documentToMarkdown,
   markdownToDocument,
@@ -46,11 +42,11 @@ import {
   type KindRenderContext,
   type PropertiesPanelProps,
 } from "@/lib/document-kinds";
-import {
-  documentToResearch,
-  documentToPRD,
-  documentToMemo,
-} from "@/lib/document-adapters";
+import { SaveIndicator } from "@/components/document/save-indicator";
+import { SuggestedConnections } from "@/components/document/suggested-connections";
+import { useEntityChoices } from "@/lib/hooks/use-entity-choices";
+import { useHydrated } from "@/lib/hooks/use-hydrated";
+import { detectUnlinkedMentions } from "@/lib/auto-detect-mentions";
 import "@/components/document/properties-panels";
 import { cn } from "@/lib/utils";
 
@@ -69,25 +65,20 @@ export default function DocumentDetailPage({ params }: Props) {
   const customers = useProfilerStore((s) => s.customers ?? {});
   const businessUnits = useProfilerStore((s) => s.businessUnits ?? {});
   const metrics = useProfilerStore((s) => s.metrics ?? {});
-  const replaceMetricsForResearch = useProfilerStore(
-    (s) => s.replaceMetricsForResearch,
-  );
-  const replaceMetricsForPRD = useProfilerStore(
-    (s) => s.replaceMetricsForPRD,
-  );
-  const replaceMetricsForMemo = useProfilerStore(
-    (s) => s.replaceMetricsForMemo,
+  const replaceMetricsForDocument = useProfilerStore(
+    (s) => s.replaceMetricsForDocument,
   );
   const people = useEffectivePeople();
+  const entityChoices = useEntityChoices({ excludeDocumentId: documentId });
+  const hydrated = useHydrated();
 
-  const [hydrated, setHydrated] = useState(false);
   const [extracting, setExtracting] = useState(false);
   const [extractError, setExtractError] = useState<string | null>(null);
-  const [propertiesOpen, setPropertiesOpen] = useState(false);
+  const propertiesOpen = useProfilerStore((s) => s.propertiesPanelOpen);
+  const setPropertiesOpen = useProfilerStore((s) => s.setPropertiesPanelOpen);
   const [saveState, setSaveState] = useState<
     "idle" | "dirty" | "saving" | "saved"
   >("idle");
-  useEffect(() => setHydrated(true), []);
 
   const derivedMetrics = useMemo(
     () =>
@@ -142,24 +133,16 @@ export default function DocumentDetailPage({ params }: Props) {
     setExtractError(null);
     setExtracting(true);
     try {
-      if (document.kind === "research") {
-        const next = await extractMetricsFromResearch({
-          research: documentToResearch(document),
-          businessUnits: Object.values(businessUnits),
-        });
-        replaceMetricsForResearch(document.id, next);
-      } else if (document.kind === "prd") {
-        const next = await extractMetricsFromPRD({
-          prd: documentToPRD(document),
-          businessUnits: Object.values(businessUnits),
-        });
-        replaceMetricsForPRD(document.id, next);
-      } else if (document.kind === "memo") {
-        const next = await extractMetricsFromMemo({
-          memo: documentToMemo(document),
-          businessUnits: Object.values(businessUnits),
-        });
-        replaceMetricsForMemo(document.id, next);
+      if (
+        document.kind === "research" ||
+        document.kind === "prd" ||
+        document.kind === "memo"
+      ) {
+        const next = await extractMetricsFromDocument(
+          document,
+          Object.values(businessUnits),
+        );
+        replaceMetricsForDocument(document.id, document.kind, next);
       }
     } catch (e) {
       setExtractError((e as Error).message);
@@ -167,6 +150,48 @@ export default function DocumentDetailPage({ params }: Props) {
       setExtracting(false);
     }
   }
+
+  // Memoize ctx + initialMarkdown unconditionally (above every early
+  // return) so the hook order stays stable across renders. The Rules of
+  // Hooks require every hook to be called every render, even when we end
+  // up rendering "not found" or redirecting away.
+  const ctx: KindRenderContext = useMemo(
+    () => ({
+      people,
+      customers: Object.values(customers),
+      objectives: OBJECTIVES,
+      businessUnits: Object.values(businessUnits),
+    }),
+    [people, customers, businessUnits],
+  );
+
+  const initialMarkdown = useMemo(
+    () => (document ? documentToMarkdown(document) : ""),
+    [document],
+  );
+
+  // Auto-detected unlinked names in the body. Recompute when the body
+  // changes or when the entity rosters change. Stay above early returns
+  // for hook-order stability.
+  const documentsMap = useProfilerStore((s) => s.documents ?? {});
+  const suggestions = useMemo(() => {
+    if (!document) return [];
+    if (
+      document.kind !== "research" &&
+      document.kind !== "prd" &&
+      document.kind !== "memo"
+    ) {
+      return [];
+    }
+    return detectUnlinkedMentions({
+      doc: document,
+      people,
+      customers: Object.values(customers),
+      otherDocuments: Object.values(documentsMap).filter(
+        (d) => d.id !== document.id,
+      ),
+    });
+  }, [document, people, customers, documentsMap]);
 
   if (!hydrated) return null;
   if (!document) {
@@ -191,41 +216,6 @@ export default function DocumentDetailPage({ params }: Props) {
   }
 
   const config = getDocumentKindConfig(document.kind);
-  const ctx: KindRenderContext = {
-    people,
-    customers: Object.values(customers),
-    objectives: OBJECTIVES,
-    businessUnits: Object.values(businessUnits),
-  };
-
-  const initialMarkdown = documentToMarkdown(document);
-
-  const entityChoices: EntityChoice[] = [
-    ...people.map((p) => ({
-      id: p.id,
-      label: p.name,
-      sub: `${p.title}${p.team ? ` · ${p.team}` : ""}`,
-      kind: "person" as const,
-    })),
-    ...Object.values(customers).map((c) => ({
-      id: c.id,
-      label: c.name,
-      sub: c.industry,
-      kind: "customer" as const,
-    })),
-    ...OBJECTIVES.map((o) => ({
-      id: o.id,
-      label: o.title,
-      sub: o.description,
-      kind: "objective" as const,
-    })),
-    ...Object.values(businessUnits).map((b) => ({
-      id: b.id,
-      label: b.name,
-      sub: b.description,
-      kind: "business-unit" as const,
-    })),
-  ];
 
   const Panel = config.PropertiesPanel as
     | ((props: PropertiesPanelProps<typeof document.kind>) => React.ReactElement)
@@ -275,13 +265,13 @@ export default function DocumentDetailPage({ params }: Props) {
             {config.hasPrototypePrompt && document.kind === "research" && (
               <CopyPromptButton
                 getPrompt={() =>
-                  buildResearchPrototypePrompt(documentToResearch(document))
+                  buildResearchPrototypePrompt(document)
                 }
               />
             )}
             <Button
               variant="secondary"
-              onClick={() => setPropertiesOpen((v) => !v)}
+              onClick={() => setPropertiesOpen(!propertiesOpen)}
             >
               <Settings2 className="w-3.5 h-3.5" />
               Properties
@@ -356,6 +346,37 @@ export default function DocumentDetailPage({ params }: Props) {
         </div>
       )}
 
+      {suggestions.length > 0 && (
+        <Section
+          title="Suggested connections"
+          subtitle={`${suggestions.length} name${suggestions.length === 1 ? "" : "s"} detected in the body`}
+          divider
+        >
+          <SuggestedConnections
+            suggestions={suggestions}
+            disabled={!!document.locked}
+            onLinkPerson={(id) => {
+              if (!document) return;
+              saveDocument({
+                ...document,
+                linkedPersonIds: [
+                  ...new Set([...document.linkedPersonIds, id]),
+                ],
+              });
+            }}
+            onLinkCustomer={(id) => {
+              if (!document) return;
+              saveDocument({
+                ...document,
+                linkedCustomerIds: [
+                  ...new Set([...document.linkedCustomerIds, id]),
+                ],
+              });
+            }}
+          />
+        </Section>
+      )}
+
       {config.hasMetrics && (derivedMetrics.length > 0 || extracting) && (
         <Section
           title="Derived metrics"
@@ -390,23 +411,6 @@ export default function DocumentDetailPage({ params }: Props) {
       </Section>
     </div>
   );
-}
-
-function SaveIndicator({
-  state,
-  locked,
-}: {
-  state: "idle" | "dirty" | "saving" | "saved";
-  locked: boolean;
-}) {
-  if (locked) return <span className="text-muted-foreground">Locked</span>;
-  if (state === "saving")
-    return <span className="text-muted-foreground">Saving…</span>;
-  if (state === "saved")
-    return <span className="text-muted-foreground">Saved</span>;
-  if (state === "dirty")
-    return <span className="text-muted-foreground">Unsaved</span>;
-  return null;
 }
 
 function MetricsTable({

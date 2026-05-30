@@ -1,7 +1,7 @@
 "use client";
-import { useMemo, useState } from "react";
+import { Suspense, useMemo, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   ArrowLeft,
   BookOpen,
@@ -18,38 +18,20 @@ import { DocumentDropzone } from "@/components/document-dropzone";
 import { useProfilerStore } from "@/lib/store";
 import { useEffectivePeople } from "@/lib/people-hooks";
 import { OBJECTIVES } from "@/lib/data/objectives";
-import { extractDocument, categorizeResearch } from "@/lib/extract/actions";
+import { extractDocument } from "@/lib/extract/actions";
+import { categorizeDocument } from "@/lib/extract/document-actions";
 import { fetchUrl } from "@/lib/extract/url-fetch";
-import { categorizePRD } from "@/lib/extract/prd-actions";
-import { categorizeMemo } from "@/lib/extract/memo-actions";
 import {
   classifyDocument,
   type ClassificationResult,
   type ClassifiedKind,
 } from "@/lib/extract/classify";
-import {
-  extractMetricsFromMemo,
-  extractMetricsFromPRD,
-  extractMetricsFromResearch,
-} from "@/lib/llm/extract-metrics";
+import { extractMetricsFromDocument } from "@/lib/llm/extract-metrics";
 import {
   suggestExpertiseFromArtifact,
   type ArtifactSummary,
 } from "@/lib/llm/suggest-expertise";
 import { mergeExpertiseSuggestion } from "@/lib/expertise-merge";
-import {
-  MarkdownEditor,
-  type EntityChoice,
-} from "@/components/admin/markdown-editor";
-import {
-  documentToMarkdown,
-  markdownToDocument,
-} from "@/lib/document-md";
-import {
-  documentToMemo,
-  documentToPRD,
-  documentToResearch,
-} from "@/lib/document-adapters";
 import type {
   MemoDocument,
   PRDDocument,
@@ -76,15 +58,7 @@ type Stage =
       filename?: string;
       classification: ClassificationResult;
     }
-  | { kind: "categorizing"; kind2: ClassifiedKind; confidence: number }
-  | {
-      kind: "review";
-      kind2: ClassifiedKind;
-      markdown: string;
-      classification: ClassificationResult;
-      uploadedFrom?: { filename: string; kind: string };
-      sourceUrl?: string;
-    };
+  | { kind: "categorizing"; kind2: ClassifiedKind; confidence: number };
 
 const KIND_META: Record<
   ClassifiedKind,
@@ -111,22 +85,38 @@ const KIND_META: Record<
   },
 };
 
-export default function KnowledgeIntakePage() {
+// useSearchParams() forces this page to be client-rendered. Next 16 bails
+// the prerender unless the consuming subtree is inside a Suspense, so we
+// split the page: a thin default export wraps the real implementation in
+// a Suspense fallback that matches the chrome.
+export default function KnowledgeIntakePageWrapper() {
+  return (
+    <Suspense fallback={null}>
+      <KnowledgeIntakePage />
+    </Suspense>
+  );
+}
+
+function KnowledgeIntakePage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  // ?kind=research|prd|memo bypasses the classifier — the kind is already
+  // known (came from a kind-specific entry point), so we jump straight to
+  // categorize → review.
+  const kindHint = (() => {
+    const raw = searchParams.get("kind");
+    if (raw === "research" || raw === "prd" || raw === "memo") return raw;
+    return null;
+  })();
+
   const customers = useProfilerStore((s) => s.customers ?? {});
   const businessUnits = useProfilerStore((s) => s.businessUnits ?? {});
   const people = useEffectivePeople();
 
   const saveDocument = useProfilerStore((s) => s.saveDocument);
   const saveProfile = useProfilerStore((s) => s.saveProfile);
-  const replaceMetricsForResearch = useProfilerStore(
-    (s) => s.replaceMetricsForResearch,
-  );
-  const replaceMetricsForPRD = useProfilerStore(
-    (s) => s.replaceMetricsForPRD,
-  );
-  const replaceMetricsForMemo = useProfilerStore(
-    (s) => s.replaceMetricsForMemo,
+  const replaceMetricsForDocument = useProfilerStore(
+    (s) => s.replaceMetricsForDocument,
   );
 
   const [stage, setStage] = useState<Stage>({ kind: "idle" });
@@ -156,6 +146,27 @@ export default function KnowledgeIntakePage() {
     setError(null);
     if (!text.trim()) {
       setError("No text to ingest.");
+      return;
+    }
+    // ?kind=… short-circuit: the kind is already known, so skip the
+    // classifier and jump straight to categorize. Empty suggestedLinks
+    // since we didn't run classification — the user fills them in via the
+    // Properties panel on the detail page.
+    if (kindHint) {
+      await routeAndSave(text, filename, kindHint, {
+        kind: kindHint,
+        confidence: 1,
+        rationale: "Kind specified via query parameter.",
+        alternates: [],
+        suggestedLinks: {
+          tags: [],
+          personIds: [],
+          customerIds: [],
+          objectiveIds: [],
+          businessUnitId: undefined,
+        },
+        generatedBy: "mock",
+      });
       return;
     }
     setStage({ kind: "classifying", text, filename });
@@ -267,9 +278,9 @@ export default function KnowledgeIntakePage() {
     }
   }
 
-  // Categorize → build artifact seed → convert to markdown → switch to
-  // "review" stage where the user sees the MarkdownEditor pre-filled and
-  // commits the save manually.
+  // Categorize → build doc seed → save + route to /documents/[id]. The
+  // detail page is the unified editing surface, so we hand off directly
+  // instead of staging a "review" step with a separate editor instance.
   async function routeAndSave(
     text: string,
     filename: string | undefined,
@@ -284,56 +295,44 @@ export default function KnowledgeIntakePage() {
     try {
       const uploadedFrom =
         filename && !urlSource ? { filename, kind: "auto" } : undefined;
-      let markdown = "";
-      if (kind === "research") {
-        const cat = await categorizeResearch({ content: text, filename });
-        const seed: ResearchDocument = {
-          id: "",
+      const cat = await categorizeDocument({ content: text, filename }, kind);
+      const id = newDocumentId(kind);
+      const base = {
+        id,
+        title: cat.title?.trim() || defaultTitleFor(kind),
+        summary: cat.summary ?? "",
+        // Intake preserves the source verbatim — synthesis is where
+        // AI rewrites happen.
+        content: text,
+        tags: dedupe([
+          ...(cat.tags ?? []),
+          ...classification.suggestedLinks.tags,
+        ]),
+        linkedPersonIds: classification.suggestedLinks.personIds,
+        linkedCustomerIds: classification.suggestedLinks.customerIds,
+        linkedObjectiveIds: classification.suggestedLinks.objectiveIds,
+        uploadedFrom,
+        sourceUrl: urlSource,
+        createdAt: new Date().toISOString(),
+      };
+
+      let seed: ResearchDocument | PRDDocument | MemoDocument;
+      if (cat.kind === "research") {
+        seed = {
+          ...base,
           kind: "research",
-          title: cat.title?.trim() || "Untitled research",
-          summary: cat.summary ?? "",
-          // Intake preserves the source verbatim — synthesis is where
-          // AI rewrites happen.
-          content: text,
           source: cat.sourceHint ?? "Internal",
-          tags: dedupe([
-            ...(cat.tags ?? []),
-            ...classification.suggestedLinks.tags,
-          ]),
-          linkedPersonIds: classification.suggestedLinks.personIds,
-          linkedCustomerIds: classification.suggestedLinks.customerIds,
-          linkedObjectiveIds: classification.suggestedLinks.objectiveIds,
-          uploadedFrom,
-          sourceUrl: urlSource,
-          createdAt: new Date().toISOString(),
           properties: {
             participants: cat.participants ?? [],
             methodology: cat.methodology,
           },
         };
-        markdown = documentToMarkdown(seed);
-      } else if (kind === "prd") {
-        const cat = await categorizePRD({ content: text, filename });
-        const seed: PRDDocument = {
-          id: "",
+      } else if (cat.kind === "prd") {
+        seed = {
+          ...base,
           kind: "prd",
-          title: cat.title?.trim() || "Untitled PRD",
-          summary: cat.summary ?? "",
-          // Intake preserves the source verbatim — synthesis is where
-          // AI rewrites happen.
-          content: text,
           source: cat.sourceHint,
-          tags: dedupe([
-            ...(cat.tags ?? []),
-            ...classification.suggestedLinks.tags,
-          ]),
-          linkedPersonIds: classification.suggestedLinks.personIds,
-          linkedCustomerIds: classification.suggestedLinks.customerIds,
-          linkedObjectiveIds: classification.suggestedLinks.objectiveIds,
           linkedBusinessUnitId: classification.suggestedLinks.businessUnitId,
-          uploadedFrom,
-          sourceUrl: urlSource,
-          createdAt: new Date().toISOString(),
           properties: {
             problem: cat.problem ?? "",
             solution: cat.solution ?? "",
@@ -345,109 +344,48 @@ export default function KnowledgeIntakePage() {
               : undefined,
           },
         };
-        markdown = documentToMarkdown(seed);
       } else {
-        const cat = await categorizeMemo({ content: text, filename });
-        const seed: MemoDocument = {
-          id: "",
+        seed = {
+          ...base,
           kind: "memo",
-          title: cat.title?.trim() || "Untitled memo",
-          summary: cat.summary ?? "",
-          // Intake preserves the source verbatim — synthesis is where
-          // AI rewrites happen.
-          content: text,
           source: cat.sourceHint,
-          tags: dedupe([
-            ...(cat.tags ?? []),
-            ...classification.suggestedLinks.tags,
-          ]),
-          linkedPersonIds: classification.suggestedLinks.personIds,
-          linkedCustomerIds: classification.suggestedLinks.customerIds,
-          linkedObjectiveIds: classification.suggestedLinks.objectiveIds,
           linkedBusinessUnitId: classification.suggestedLinks.businessUnitId,
-          uploadedFrom,
-          sourceUrl: urlSource,
-          createdAt: new Date().toISOString(),
           properties: {
             memoKind: cat.memoKind ?? "other",
             keyClaims: cat.keyClaims ?? [],
             decisions: cat.decisions ?? [],
           },
         };
-        markdown = documentToMarkdown(seed);
       }
-      setStage({
-        kind: "review",
-        kind2: kind,
-        markdown,
-        classification,
-        uploadedFrom,
-        sourceUrl: urlSource,
-      });
+
+      saveDocument(seed);
+      extractMetricsFromDocument(seed, Object.values(businessUnits))
+        .then((m) => replaceMetricsForDocument(seed.id, seed.kind, m))
+        .catch((e) =>
+          console.error(`${seed.kind} metric extraction failed:`, e),
+        );
+      runExpertise(
+        { kind: seed.kind, document: seed } as Parameters<typeof runExpertise>[0],
+        seed.linkedPersonIds,
+      );
+      router.push(`/documents/${seed.id}`);
     } catch (e) {
       setStage({ kind: "idle" });
       setError((e as Error).message ?? "Categorization failed.");
     }
   }
 
-  function handleCommitReview(nextMarkdown: string) {
-    if (stage.kind !== "review") return;
-    const { kind2, uploadedFrom, sourceUrl } = stage;
-    if (kind2 === "research") {
-      const { document } = markdownToDocument<"research">(nextMarkdown, {
-        kind: "research",
-      });
-      if (uploadedFrom && !document.uploadedFrom)
-        document.uploadedFrom = uploadedFrom;
-      if (sourceUrl && !document.sourceUrl) document.sourceUrl = sourceUrl;
-      saveDocument(document);
-      const legacy = documentToResearch(document);
-      extractMetricsFromResearch({
-        research: legacy,
-        businessUnits: Object.values(businessUnits),
-      })
-        .then((m) => replaceMetricsForResearch(document.id, m))
-        .catch((e) => console.error("research metric extraction failed:", e));
-      runExpertise(
-        { kind: "research", item: legacy },
-        document.linkedPersonIds,
-      );
-      router.push(`/documents/${document.id}`);
-    } else if (kind2 === "prd") {
-      const { document } = markdownToDocument<"prd">(nextMarkdown, {
-        kind: "prd",
-      });
-      if (uploadedFrom && !document.uploadedFrom)
-        document.uploadedFrom = uploadedFrom;
-      if (sourceUrl && !document.sourceUrl) document.sourceUrl = sourceUrl;
-      saveDocument(document);
-      const legacy = documentToPRD(document);
-      extractMetricsFromPRD({
-        prd: legacy,
-        businessUnits: Object.values(businessUnits),
-      })
-        .then((m) => replaceMetricsForPRD(document.id, m))
-        .catch((e) => console.error("PRD metric extraction failed:", e));
-      runExpertise({ kind: "prd", item: legacy }, document.linkedPersonIds);
-      router.push(`/documents/${document.id}`);
-    } else {
-      const { document } = markdownToDocument<"memo">(nextMarkdown, {
-        kind: "memo",
-      });
-      if (uploadedFrom && !document.uploadedFrom)
-        document.uploadedFrom = uploadedFrom;
-      if (sourceUrl && !document.sourceUrl) document.sourceUrl = sourceUrl;
-      saveDocument(document);
-      const legacy = documentToMemo(document);
-      extractMetricsFromMemo({
-        memo: legacy,
-        businessUnits: Object.values(businessUnits),
-      })
-        .then((m) => replaceMetricsForMemo(document.id, m))
-        .catch((e) => console.error("memo metric extraction failed:", e));
-      runExpertise({ kind: "memo", item: legacy }, document.linkedPersonIds);
-      router.push(`/documents/${document.id}`);
-    }
+  function newDocumentId(kind: "research" | "prd" | "memo"): string {
+    const prefix = kind === "research" ? "res" : kind === "prd" ? "prd" : "memo";
+    return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+  }
+
+  function defaultTitleFor(kind: "research" | "prd" | "memo"): string {
+    return kind === "research"
+      ? "Untitled research"
+      : kind === "prd"
+        ? "Untitled PRD"
+        : "Untitled memo";
   }
 
   return (
@@ -595,77 +533,6 @@ export default function KnowledgeIntakePage() {
         />
       )}
 
-      {stage.kind === "review" && (
-        <ReviewMarkdown
-          kind={stage.kind2}
-          initialMarkdown={stage.markdown}
-          entityChoices={[
-            ...people.map((p) => ({
-              id: p.id,
-              label: p.name,
-              sub: `${p.title}${p.team ? ` · ${p.team}` : ""}`,
-              kind: "person" as const,
-            })),
-            ...Object.values(customers).map((c) => ({
-              id: c.id,
-              label: c.name,
-              sub: c.industry,
-              kind: "customer" as const,
-            })),
-            ...OBJECTIVES.map((o) => ({
-              id: o.id,
-              label: o.title,
-              sub: o.description,
-              kind: "objective" as const,
-            })),
-            ...Object.values(businessUnits).map((b) => ({
-              id: b.id,
-              label: b.name,
-              sub: b.description,
-              kind: "business-unit" as const,
-            })),
-          ]}
-          onCommit={handleCommitReview}
-          onCancel={() => setStage({ kind: "idle" })}
-        />
-      )}
-    </div>
-  );
-}
-
-function ReviewMarkdown({
-  kind,
-  initialMarkdown,
-  entityChoices,
-  onCommit,
-  onCancel,
-}: {
-  kind: ClassifiedKind;
-  initialMarkdown: string;
-  entityChoices: EntityChoice[];
-  onCommit: (md: string) => void;
-  onCancel: () => void;
-}) {
-  const [draft, setDraft] = useState(initialMarkdown);
-  return (
-    <div>
-      <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium mb-1">
-        Classified as · {kind}
-      </div>
-      <p className="text-[13px] text-muted-foreground mb-3">
-        Review the AI-assembled markdown before filing. Edit anything — top
-        bullets set typed fields. Type{" "}
-        <code className="bg-muted px-1 rounded text-[12px]">@</code> to insert
-        an entity id.
-      </p>
-      <MarkdownEditor
-        value={draft}
-        onChange={setDraft}
-        onSave={() => onCommit(draft)}
-        onCancel={onCancel}
-        saveLabel="File it"
-        entities={entityChoices}
-      />
     </div>
   );
 }

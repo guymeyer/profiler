@@ -21,8 +21,7 @@ export function QualitySignals({
   artifactTitle,
   className,
 }: Props) {
-  const syntheses = useProfilerStore((s) => s.syntheses ?? {});
-  const decks = useProfilerStore((s) => s.decks ?? {});
+  const documents = useProfilerStore((s) => s.documents ?? {});
   const recs = useProfilerStore((s) => s.buRecommendations ?? {});
   const metrics = useProfilerStore((s) => s.metrics ?? {});
 
@@ -32,8 +31,10 @@ export function QualitySignals({
     // Syntheses that include this research as a source. Synthesis only
     // sources research today, so this is empty for PRDs and memos.
     if (artifactKind === "research") {
-      const synthesisCount = Object.values(syntheses).filter((s) =>
-        s.researchIds.includes(artifactId),
+      const synthesisCount = Object.values(documents).filter(
+        (d) =>
+          d.kind === "microsite" &&
+          d.properties.researchIds.includes(artifactId),
       ).length;
       if (synthesisCount > 0) {
         out.push({
@@ -48,9 +49,15 @@ export function QualitySignals({
     // whose synthesis includes this artifact (research only).
     if (artifactKind === "research") {
       const includingDecks = new Set<string>();
-      for (const d of Object.values(decks)) {
-        const s = syntheses[d.synthesisId];
-        if (s && s.researchIds.includes(artifactId)) includingDecks.add(d.id);
+      for (const d of Object.values(documents)) {
+        if (d.kind !== "deck") continue;
+        const s = documents[d.properties.synthesisId];
+        if (
+          s &&
+          s.kind === "microsite" &&
+          s.properties.researchIds.includes(artifactId)
+        )
+          includingDecks.add(d.id);
       }
       if (includingDecks.size > 0) {
         out.push({
@@ -98,7 +105,7 @@ export function QualitySignals({
     }
 
     return out;
-  }, [artifactKind, artifactId, syntheses, decks, recs, metrics]);
+  }, [artifactKind, artifactId, documents, recs, metrics]);
 
   if (signals.length === 0) return null;
 

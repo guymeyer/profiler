@@ -3,7 +3,7 @@ import type {
   Objective,
   Artifact,
   Customer,
-  ResearchArtifact,
+  ResearchDocument,
   OKR,
   BusinessUnit,
 } from "@/lib/types";
@@ -96,15 +96,17 @@ function pushBlock(out: string[], heading: string, items: string[]) {
   for (const item of items) out.push(`- ${item}`);
 }
 
-export function serializeResearch(r: ResearchArtifact): string {
+export function serializeResearch(r: ResearchDocument): string {
   const lines: string[] = [];
   lines.push(`## ${r.title}`);
   lines.push(`Id: ${r.id}`);
-  lines.push(`Source: ${r.source}`);
-  if (r.conductedAt) lines.push(`Conducted: ${r.conductedAt}`);
-  if (r.methodology) lines.push(`Methodology: ${r.methodology}`);
-  if (r.participants.length > 0) {
-    lines.push(`Participants: ${r.participants.join("; ")}`);
+  lines.push(`Source: ${r.source ?? "Internal"}`);
+  if (r.properties.conductedAt)
+    lines.push(`Conducted: ${r.properties.conductedAt}`);
+  if (r.properties.methodology)
+    lines.push(`Methodology: ${r.properties.methodology}`);
+  if (r.properties.participants.length > 0) {
+    lines.push(`Participants: ${r.properties.participants.join("; ")}`);
   }
   if (r.summary) {
     lines.push("");
@@ -141,7 +143,7 @@ export function buildAudienceBlock(
   people: Person[],
   objectives: Objective[],
   customer?: Customer,
-  research: ResearchArtifact[] = [],
+  research: ResearchDocument[] = [],
   okrs: OKR[] = [],
   bus: Record<string, BusinessUnit> = {},
 ): string {

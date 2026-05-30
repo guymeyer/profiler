@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page-header";
@@ -9,23 +9,25 @@ import {
   type InlineDatabaseColumn,
 } from "@/components/ui/inline-database";
 import { useProfilerStore } from "@/lib/store";
-import type { Synthesis } from "@/lib/types";
+import { useHydrated } from "@/lib/hooks/use-hydrated";
+import type { MicrositeDocument } from "@/lib/types";
 
 export default function SynthesisListPage() {
-  const syntheses = useProfilerStore((s) => s.syntheses ?? {});
-  const [hydrated, setHydrated] = useState(false);
-  useEffect(() => setHydrated(true), []);
+  const documents = useProfilerStore((s) => s.documents ?? {});
+  const hydrated = useHydrated();
 
   const list = useMemo(
     () =>
-      Object.values(syntheses).sort(
+      (Object.values(documents).filter(
+        (d) => d.kind === "microsite",
+      ) as MicrositeDocument[]).sort(
         (a, b) =>
           new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
       ),
-    [syntheses],
+    [documents],
   );
 
-  const columns: InlineDatabaseColumn<Synthesis>[] = [
+  const columns: InlineDatabaseColumn<MicrositeDocument>[] = [
     {
       key: "title",
       label: "Title",
@@ -37,8 +39,8 @@ export default function SynthesisListPage() {
       label: "Reports",
       kind: "number",
       width: "w-[90px]",
-      render: (s) => s.researchIds.length,
-      sortValue: (s) => s.researchIds.length,
+      render: (s) => s.properties.researchIds.length,
+      sortValue: (s) => s.properties.researchIds.length,
     },
     {
       key: "lenses",
@@ -46,7 +48,9 @@ export default function SynthesisListPage() {
       kind: "number",
       width: "w-[90px]",
       render: (s) =>
-        s.outline?.lenses ? Object.keys(s.outline.lenses).length : 0,
+        s.properties.outline?.lenses
+          ? Object.keys(s.properties.outline.lenses).length
+          : 0,
     },
     {
       key: "model",
@@ -54,7 +58,9 @@ export default function SynthesisListPage() {
       kind: "muted",
       width: "w-[140px]",
       render: (s) =>
-        s.generatedBy === "mock" ? "mock" : (s.model ?? "anthropic"),
+        s.properties.generatedBy === "mock"
+          ? "mock"
+          : (s.properties.model ?? "anthropic"),
     },
     {
       key: "createdAt",

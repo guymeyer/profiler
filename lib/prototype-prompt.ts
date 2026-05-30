@@ -1,4 +1,4 @@
-import type { ResearchArtifact, Synthesis } from "@/lib/types";
+import type { MicrositeDocument, ResearchDocument } from "@/lib/types";
 
 // Builders for "prototype prompts" — text the user copies and pastes into
 // Claude (claude.ai or Claude Code) to get a visual artifact (HTML / React)
@@ -8,7 +8,7 @@ import type { ResearchArtifact, Synthesis } from "@/lib/types";
 
 const MAX_RESEARCH_CONTENT_CHARS = 12_000;
 
-export function buildResearchPrototypePrompt(r: ResearchArtifact): string {
+export function buildResearchPrototypePrompt(r: ResearchDocument): string {
   const trimmed =
     r.content.length > MAX_RESEARCH_CONTENT_CHARS
       ? r.content.slice(0, MAX_RESEARCH_CONTENT_CHARS) +
@@ -17,10 +17,12 @@ export function buildResearchPrototypePrompt(r: ResearchArtifact): string {
 
   const metaLines: string[] = [];
   if (r.source) metaLines.push(`- Source: ${r.source}`);
-  if (r.conductedAt) metaLines.push(`- Conducted: ${r.conductedAt}`);
-  if (r.methodology) metaLines.push(`- Methodology: ${r.methodology}`);
-  if (r.participants.length > 0)
-    metaLines.push(`- Participants: ${r.participants.join(", ")}`);
+  if (r.properties.conductedAt)
+    metaLines.push(`- Conducted: ${r.properties.conductedAt}`);
+  if (r.properties.methodology)
+    metaLines.push(`- Methodology: ${r.properties.methodology}`);
+  if (r.properties.participants.length > 0)
+    metaLines.push(`- Participants: ${r.properties.participants.join(", ")}`);
 
   return `# Build me a visual prototype from this research
 
@@ -56,10 +58,10 @@ Begin by writing the three HMW questions and your pick of the most consequential
 // Claude onto a single question instead of asking it to choose. Not
 // lens-specific by design ("general solution").
 export function buildHmwPrototypePrompt(
-  s: Synthesis,
+  s: MicrositeDocument,
   hmw: string,
 ): string {
-  const outline = s.outline;
+  const outline = s.properties.outline;
   if (!outline) {
     return `# Build me a visual prototype
 
@@ -126,8 +128,8 @@ function stripHmwPrefix(q: string): string {
   return q.replace(/^how\s+might\s+we\s+/i, "").trim();
 }
 
-export function buildSynthesisPrototypePrompt(s: Synthesis): string {
-  const outline = s.outline;
+export function buildSynthesisPrototypePrompt(s: MicrositeDocument): string {
+  const outline = s.properties.outline;
   if (!outline) {
     return `# Build me a visual prototype
 

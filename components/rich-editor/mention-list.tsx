@@ -11,7 +11,12 @@ export interface EntityChoice {
   id: string;
   label: string;
   sub?: string;
-  kind: "person" | "customer" | "objective" | "business-unit";
+  kind:
+    | "person"
+    | "customer"
+    | "objective"
+    | "business-unit"
+    | "document";
 }
 
 const KIND_LABELS: Record<EntityChoice["kind"], string> = {
@@ -19,7 +24,25 @@ const KIND_LABELS: Record<EntityChoice["kind"], string> = {
   customer: "Customer",
   objective: "Objective",
   "business-unit": "BU",
+  document: "Doc",
 };
+
+// Each mention kind routes to its detail page. Used by the renderer to
+// turn a chip into a clickable anchor.
+export function hrefForEntity(kind: EntityChoice["kind"], id: string): string {
+  switch (kind) {
+    case "person":
+      return `/people/${id}`;
+    case "customer":
+      return `/customers/${id}`;
+    case "objective":
+      return `/objectives/${id}`;
+    case "business-unit":
+      return `/business-units/${id}`;
+    case "document":
+      return `/documents/${id}`;
+  }
+}
 
 export interface MentionListRef {
   onKeyDown: (props: { event: KeyboardEvent }) => boolean;

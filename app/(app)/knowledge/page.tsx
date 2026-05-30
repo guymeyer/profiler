@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,13 +13,14 @@ import {
 } from "@/components/ui/inline-database";
 import { cn } from "@/lib/utils";
 import { useProfilerStore } from "@/lib/store";
+import { useHydrated } from "@/lib/hooks/use-hydrated";
 import {
   MEMO_KIND_LABELS,
   PRD_STATUS_LABELS,
   type Document,
 } from "@/lib/types";
 
-type Kind = "research" | "prd" | "memo";
+type Kind = "research" | "prd" | "memo" | "microsite" | "deck";
 
 interface KnowledgeRow {
   id: string;
@@ -38,13 +39,14 @@ const KIND_LABELS: Record<Kind, string> = {
   research: "Research",
   prd: "PRD",
   memo: "Memo",
+  microsite: "Synthesis",
+  deck: "Deck",
 };
 
 export default function KnowledgeListPage() {
   const documents = useProfilerStore((s) => s.documents ?? {});
   const bus = useProfilerStore((s) => s.businessUnits ?? {});
-  const [hydrated, setHydrated] = useState(false);
-  useEffect(() => setHydrated(true), []);
+  const hydrated = useHydrated();
   const [q, setQ] = useState("");
   const [activeKind, setActiveKind] = useState<Kind | null>(null);
 
@@ -92,6 +94,30 @@ export default function KnowledgeListPage() {
           createdAt: d.createdAt,
           href: `/documents/${d.id}`,
         });
+      } else if (d.kind === "microsite") {
+        // Microsites render in their bespoke viewer at /synthesis/[id]
+        // rather than the unified Document detail page.
+        out.push({
+          id: d.id,
+          kind: "microsite",
+          title: d.title,
+          summary: `Synthesis across ${d.properties.researchIds.length} research source${d.properties.researchIds.length === 1 ? "" : "s"}`,
+          source: d.properties.model ?? d.properties.generatedBy,
+          tags: d.tags,
+          createdAt: d.createdAt,
+          href: `/synthesis/${d.id}`,
+        });
+      } else if (d.kind === "deck") {
+        out.push({
+          id: d.id,
+          kind: "deck",
+          title: d.title,
+          summary: `${d.properties.slides.length} slide${d.properties.slides.length === 1 ? "" : "s"}`,
+          source: d.properties.model ?? d.properties.generatedBy,
+          tags: d.tags,
+          createdAt: d.createdAt,
+          href: `/synthesis/${d.properties.synthesisId}/decks/${d.id}`,
+        });
       }
     }
     return out.sort(
@@ -110,10 +136,16 @@ export default function KnowledgeListPage() {
   });
 
   const counts: Record<Kind, number> = useMemo(() => {
-    const init: Record<Kind, number> = { research: 0, prd: 0, memo: 0 };
+    const init: Record<Kind, number> = {
+      research: 0,
+      prd: 0,
+      memo: 0,
+      microsite: 0,
+      deck: 0,
+    };
     for (const d of Object.values(documents)) {
-      if (d.kind === "research" || d.kind === "prd" || d.kind === "memo") {
-        init[d.kind] += 1;
+      if (d.kind in init) {
+        init[d.kind as Kind] += 1;
       }
     }
     return init;

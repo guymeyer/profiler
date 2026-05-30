@@ -1,6 +1,11 @@
 "use server";
 import Anthropic from "@anthropic-ai/sdk";
-import type { Memo, PRD, Person, ResearchArtifact } from "@/lib/types";
+import type {
+  MemoDocument,
+  Person,
+  PRDDocument,
+  ResearchDocument,
+} from "@/lib/types";
 import { withRetry } from "@/lib/llm/retry";
 
 // Fire-and-forget post-ingest step: for each person linked to a newly-saved
@@ -14,9 +19,9 @@ const DEFAULT_MODEL = "claude-sonnet-4-6";
 const MAX_BODY_CHARS = 8_000;
 
 export type ArtifactSummary =
-  | { kind: "research"; item: ResearchArtifact }
-  | { kind: "prd"; item: PRD }
-  | { kind: "memo"; item: Memo };
+  | { kind: "research"; document: ResearchDocument }
+  | { kind: "prd"; document: PRDDocument }
+  | { kind: "memo"; document: MemoDocument };
 
 export interface SuggestExpertiseInput {
   artifact: ArtifactSummary;
@@ -82,7 +87,7 @@ function serializeArtifact(a: ArtifactSummary): string {
       ? s.slice(0, MAX_BODY_CHARS) + `\n[...truncated]`
       : s;
   if (a.kind === "research") {
-    const r = a.item;
+    const r = a.document;
     return `# Research: ${r.title}
 Summary: ${r.summary}
 Tags: ${r.tags.join(", ")}
@@ -91,23 +96,23 @@ Body:
 ${trim(r.content)}`;
   }
   if (a.kind === "prd") {
-    const p = a.item;
+    const p = a.document;
     return `# PRD: ${p.title}
 Summary: ${p.summary}
-Problem: ${p.problem}
-Solution: ${p.solution}
-Target users: ${p.targetUsers.join(", ")}
+Problem: ${p.properties.problem}
+Solution: ${p.properties.solution}
+Target users: ${p.properties.targetUsers.join(", ")}
 Tags: ${p.tags.join(", ")}
 
 Body:
 ${trim(p.content)}`;
   }
-  const m = a.item;
+  const m = a.document;
   return `# Memo: ${m.title}
 Summary: ${m.summary}
-Kind: ${m.memoKind}
+Kind: ${m.properties.memoKind}
 Key claims:
-${m.keyClaims.map((c: string) => `- ${c}`).join("\n")}
+${m.properties.keyClaims.map((c: string) => `- ${c}`).join("\n")}
 Tags: ${m.tags.join(", ")}
 
 Body:

@@ -103,10 +103,8 @@ export interface Customer {
   createdAt: string;
 }
 
-// Memos are the catch-all narrative document — strategy memos, briefs,
-// post-mortems, market notes, anything that's neither structured research
-// nor a PRD. They live alongside research and PRDs in the Knowledge
-// repository.
+// Discriminator types used as fields inside `Document` properties bags.
+// The full Document shape lives in lib/types/document.ts.
 
 export type MemoKind =
   | "strategy"
@@ -123,35 +121,6 @@ export const MEMO_KIND_LABELS: Record<MemoKind, string> = {
   other: "Other",
 };
 
-export interface Memo {
-  id: string;
-  title: string;
-  summary: string; // 1-3 sentence executive summary
-  memoKind: MemoKind;
-  keyClaims: string[]; // 3-6 distilled assertions the memo makes
-  decisions: string[]; // explicit decisions or recommendations the memo states
-  content: string; // full body markdown
-  source?: string; // owner / author / team
-
-  tags: string[];
-  linkedPersonIds: string[];
-  linkedCustomerIds: string[];
-  linkedObjectiveIds: string[];
-  linkedBusinessUnitId?: string;
-
-  uploadedFrom?: { filename: string; kind: string };
-  sourceUrl?: string; // when ingested from a URL rather than a file
-  locked?: boolean;
-  createdAt: string;
-  updatedAt?: string;
-}
-
-// PRDs sit alongside research as a parallel document library. Where a
-// research artifact is OBSERVATION (what users did or said), a PRD is
-// INTENT (what we plan to build). Both share much of the same outer shape
-// — tags, links, body — but PRDs carry planning-specific fields the
-// research model doesn't need.
-
 export type PRDStatus = "draft" | "review" | "approved" | "shipped";
 
 export const PRD_STATUS_LABELS: Record<PRDStatus, string> = {
@@ -160,54 +129,6 @@ export const PRD_STATUS_LABELS: Record<PRDStatus, string> = {
   approved: "Approved",
   shipped: "Shipped",
 };
-
-export interface PRD {
-  id: string;
-  title: string;
-  summary: string; // 1-3 sentence executive summary
-  problem: string; // problem statement
-  solution: string; // proposed solution
-  targetUsers: string[]; // segments / personas in scope
-  successMetrics: string[]; // target metrics, written
-  status: PRDStatus;
-  targetShipDate?: string; // ISO date best-guess
-
-  content: string; // full body markdown
-  source?: string; // owner / author / team
-
-  tags: string[];
-  linkedPersonIds: string[];
-  linkedCustomerIds: string[];
-  linkedObjectiveIds: string[];
-  linkedBusinessUnitId?: string; // scopes to a BU dashboard
-
-  uploadedFrom?: { filename: string; kind: string };
-  sourceUrl?: string; // when ingested from a public URL
-  // When true, the inline rich editor on the detail page becomes read-only.
-  locked?: boolean;
-  createdAt: string;
-  updatedAt?: string;
-}
-
-export interface ResearchArtifact {
-  id: string;
-  title: string;
-  summary: string;            // executive summary (1-3 sentences)
-  content: string;            // full body text (may come from PDF/DOCX extract)
-  source: string;             // who/team conducted, e.g. "Customer Research Team"
-  conductedAt?: string;       // ISO date — when the research was conducted
-  participants: string[];     // who was interviewed / observed
-  methodology?: string;       // brief description of how it was conducted
-  tags: string[];
-  linkedPersonIds: string[];
-  linkedCustomerIds: string[];
-  linkedObjectiveIds: string[];
-  uploadedFrom?: { filename: string; kind: string };
-  sourceUrl?: string;         // when ingested from a public URL
-  locked?: boolean;
-  createdAt: string;
-  updatedAt?: string;
-}
 
 export interface BusinessUnit {
   id: string;
@@ -492,19 +413,6 @@ export interface PersonLensSection {
   executiveSummary: PersonExecutiveSummary; // compressed for <60s reads
 }
 
-export interface Synthesis {
-  id: string;
-  title: string;
-  researchIds: string[];
-  outline: SynthesisOutline;
-  html: string; // rendered from outline; cached for direct iframe srcDoc
-  modifier?: string; // last "regenerate with modifier" prompt
-  generatedBy: "anthropic" | "mock";
-  model?: string;
-  createdAt: string;
-  updatedAt?: string;
-}
-
 // ─── Slide decks (presentation derivative of a synthesis) ───────────────────
 // A deck is a compression of a synthesis for a specific audience. Many
 // decks per synthesis (one per audience) is the persistence model — the
@@ -549,18 +457,6 @@ export interface DeckAudience {
   personIds: string[];
   objectiveIds: string[];
   intent?: string;
-}
-
-export interface SlideDeck {
-  id: string;
-  synthesisId: string;
-  title: string;
-  audience: DeckAudience;
-  slides: Slide[];
-  generatedBy: "anthropic" | "mock";
-  model?: string;
-  createdAt: string;
-  updatedAt?: string;
 }
 
 // ─── Derived metrics + BU recommendations ───────────────────────────────────

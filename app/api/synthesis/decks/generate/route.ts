@@ -17,7 +17,7 @@ export async function POST(req: Request) {
     });
   }
 
-  if (!input?.synthesis?.outline) {
+  if (!input?.synthesis?.properties?.outline) {
     return new Response(
       JSON.stringify({
         error: "synthesis (with outline) is required.",

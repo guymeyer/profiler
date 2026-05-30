@@ -22,9 +22,10 @@ import { useProfilerStore } from "@/lib/store";
 import {
   SYNTHESIS_LENSES,
   SYNTHESIS_LENS_BY_ID,
+  type DeckDocument,
+  type MicrositeDocument,
   type PersonLensDepth,
   type PersonLensSection,
-  type Synthesis,
   type SynthesisLensId,
   type SynthesisLensSection,
 } from "@/lib/types";
@@ -44,10 +45,12 @@ export default function SynthesisDetailPage() {
   const searchParams = useSearchParams();
   const id = (params?.synthesisId as string) ?? "";
 
-  const synthesis = useProfilerStore((s) => s.syntheses?.[id]);
   const documents = useProfilerStore((s) => s.documents ?? {});
-  const saveSynthesis = useProfilerStore((s) => s.saveSynthesis);
-  const deleteSynthesis = useProfilerStore((s) => s.deleteSynthesis);
+  const raw = documents[id];
+  const synthesis: MicrositeDocument | undefined =
+    raw?.kind === "microsite" ? raw : undefined;
+  const saveDocument = useProfilerStore((s) => s.saveDocument);
+  const deleteDocument = useProfilerStore((s) => s.deleteDocument);
 
   const [hydrated, setHydrated] = useState(false);
   useEffect(() => setHydrated(true), []);
@@ -60,7 +63,7 @@ export default function SynthesisDetailPage() {
   const reports = useMemo(
     () =>
       synthesis
-        ? synthesis.researchIds
+        ? synthesis.properties.researchIds
             .map((rid) => documents[rid])
             .filter((d) => d?.kind === "research")
         : [],
@@ -69,11 +72,11 @@ export default function SynthesisDetailPage() {
 
   // Lenses actually present in this synthesis (LLM may omit some).
   const availableLenses = useMemo(() => {
-    if (!synthesis?.outline?.lenses) return [];
-    return SYNTHESIS_LENSES.filter((l) => synthesis.outline.lenses[l.id]);
+    if (!synthesis?.properties.outline?.lenses) return [];
+    return SYNTHESIS_LENSES.filter((l) => synthesis.properties.outline.lenses[l.id]);
   }, [synthesis]);
 
-  const peopleLenses: PersonLensSection[] = synthesis?.outline?.people ?? [];
+  const peopleLenses: PersonLensSection[] = synthesis?.properties.outline?.people ?? [];
 
   // URL lens param can be either a functional lens id ("product-design") or
   // a person lens id ("person-<personId>"). Treat them as siblings.
@@ -103,7 +106,7 @@ export default function SynthesisDetailPage() {
 
   const activeFunctionalSection: SynthesisLensSection | undefined =
     activeFunctionalLens
-      ? synthesis?.outline?.lenses?.[activeFunctionalLens]
+      ? synthesis?.properties.outline?.lenses?.[activeFunctionalLens]
       : undefined;
 
   // For depth-toggle rendering when a person lens is active.
@@ -135,7 +138,7 @@ export default function SynthesisDetailPage() {
     setError(null);
     setRegenerating(true);
     try {
-      const selected = synthesis.researchIds
+      const selected = synthesis.properties.researchIds
         .map((rid) => documents[rid])
         .filter((d) => d?.kind === "research");
       const res = await fetch("/api/synthesis/generate", {
@@ -151,14 +154,14 @@ export default function SynthesisDetailPage() {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.error ?? `Regeneration failed (${res.status}).`);
       }
-      const { synthesis: next } = (await res.json()) as { synthesis: Synthesis };
-      const merged: Synthesis = {
+      const { synthesis: next } = (await res.json()) as { synthesis: MicrositeDocument };
+      const merged: MicrositeDocument = {
         ...next,
         id: synthesis.id,
         createdAt: synthesis.createdAt,
         updatedAt: new Date().toISOString(),
       };
-      saveSynthesis(merged);
+      saveDocument(merged);
       setModifier("");
     } catch (e) {
       setError((e as Error).message);
@@ -170,7 +173,7 @@ export default function SynthesisDetailPage() {
   function handleDelete() {
     if (!synthesis) return;
     if (!confirm("Delete this synthesis?")) return;
-    deleteSynthesis(synthesis.id);
+    deleteDocument(synthesis.id);
     router.push("/synthesis");
   }
 
@@ -178,8 +181,8 @@ export default function SynthesisDetailPage() {
   // selected lens as the default so the downloaded artifact opens on whatever
   // the user was viewing.
   function buildStandaloneHtml(): string {
-    if (!synthesis?.outline) return synthesis?.html ?? "";
-    return renderSynthesisHtml(synthesis.outline, {
+    if (!synthesis?.properties.outline) return synthesis?.properties.html ?? "";
+    return renderSynthesisHtml(synthesis.properties.outline, {
       defaultLens: activePersonLens
         ? (`person-${activePersonLens.personId}` as const)
         : (activeFunctionalLens ?? "general"),
@@ -239,9 +242,9 @@ export default function SynthesisDetailPage() {
               ? `Updated ${new Date(synthesis.updatedAt).toLocaleString()}`
               : `Created ${new Date(synthesis.createdAt).toLocaleString()}`}
             {" · "}
-            {synthesis.generatedBy === "mock"
+            {synthesis.properties.generatedBy === "mock"
               ? "mock"
-              : (synthesis.model ?? "anthropic")}
+              : (synthesis.properties.model ?? "anthropic")}
             {" · "}
             {reports.length} source{reports.length === 1 ? "" : "s"}
           </>
@@ -274,7 +277,7 @@ export default function SynthesisDetailPage() {
         }
       />
 
-      {!synthesis.outline ? (
+      {!synthesis.properties.outline ? (
         <div className="border border-dashed border-border rounded-md p-10 text-center text-[14px]">
           <div className="font-semibold text-foreground mb-1">
             This synthesis is on an older schema.
@@ -369,7 +372,7 @@ export default function SynthesisDetailPage() {
             <Card className="p-6 md:p-8">
               {activePersonLens ? (
                 <PersonLensContent
-                  outline={synthesis.outline}
+                  outline={synthesis.properties.outline}
                   synthesis={synthesis}
                   personLens={activePersonLens}
                   depth={activePersonDepth}
@@ -378,7 +381,7 @@ export default function SynthesisDetailPage() {
               ) : (
                 <SyntheisMicrositeContent
                   synthesis={synthesis}
-                  outline={synthesis.outline}
+                  outline={synthesis.properties.outline}
                   activeLens={activeFunctionalLens ?? "general"}
                   section={activeFunctionalSection}
                 />
@@ -429,10 +432,10 @@ export default function SynthesisDetailPage() {
                   </>
                 )}
               </Button>
-              {synthesis.modifier && (
+              {synthesis.properties.modifier && (
                 <div className="mt-3 pt-3 border-t text-xs">
                   <div className="text-muted-foreground mb-1">Last modifier</div>
-                  <div className="italic">{synthesis.modifier}</div>
+                  <div className="italic">{synthesis.properties.modifier}</div>
                 </div>
               )}
             </Card>
@@ -478,8 +481,8 @@ function SyntheisMicrositeContent({
   section,
   hideOverview,
 }: {
-  synthesis: Synthesis;
-  outline: NonNullable<Synthesis["outline"]>;
+  synthesis: MicrositeDocument;
+  outline: MicrositeDocument["properties"]["outline"];
   activeLens: SynthesisLensId;
   section: SynthesisLensSection | undefined;
   hideOverview?: boolean;
@@ -657,8 +660,8 @@ function PersonLensContent({
   depth,
   synthesisId,
 }: {
-  outline: NonNullable<Synthesis["outline"]>;
-  synthesis: Synthesis;
+  outline: MicrositeDocument["properties"]["outline"];
+  synthesis: MicrositeDocument;
   personLens: PersonLensSection;
   depth: PersonLensDepth;
   synthesisId: string;
@@ -779,8 +782,10 @@ function SynthesisPeopleRecommendations({
 }: {
   synthesisId: string;
 }) {
-  const synthesis = useProfilerStore((s) => s.syntheses?.[synthesisId]);
   const documents = useProfilerStore((s) => s.documents ?? {});
+  const synthRaw = documents[synthesisId];
+  const synthesis =
+    synthRaw?.kind === "microsite" ? synthRaw : undefined;
   const aggregate = useMemo(() => {
     if (!synthesis) {
       return {
@@ -795,7 +800,7 @@ function SynthesisPeopleRecommendations({
     const personIds = new Set<string>();
     const customerIds = new Set<string>();
     const objectiveIds = new Set<string>();
-    for (const rid of synthesis.researchIds) {
+    for (const rid of synthesis.properties.researchIds) {
       const r = documents[rid];
       if (!r || r.kind !== "research") continue;
       for (const t of r.tags) tags.add(t);
@@ -815,16 +820,18 @@ function SynthesisPeopleRecommendations({
 }
 
 function DecksCard({ synthesisId }: { synthesisId: string }) {
-  const decks = useProfilerStore((s) => s.decks ?? {});
+  const documents = useProfilerStore((s) => s.documents ?? {});
   const list = useMemo(
     () =>
-      Object.values(decks)
-        .filter((d) => d.synthesisId === synthesisId)
+      (Object.values(documents).filter(
+        (d) => d.kind === "deck",
+      ) as DeckDocument[])
+        .filter((d) => d.properties.synthesisId === synthesisId)
         .sort(
           (a, b) =>
             new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
         ),
-    [decks, synthesisId],
+    [documents, synthesisId],
   );
 
   return (
@@ -866,7 +873,7 @@ function DecksCard({ synthesisId }: { synthesisId: string }) {
                   {d.title}
                 </div>
                 <div className="text-[11px] text-muted-foreground mt-0.5">
-                  {d.slides.length} slides ·{" "}
+                  {d.properties.slides.length} slides ·{" "}
                   {new Date(d.createdAt).toLocaleString()}
                 </div>
               </Link>

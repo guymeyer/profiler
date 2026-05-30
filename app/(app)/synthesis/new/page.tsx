@@ -18,13 +18,13 @@ import { Avatar } from "@/components/ui/avatar";
 import { Input } from "@/components/ui/input";
 import { useProfilerStore } from "@/lib/store";
 import { useEffectivePeople } from "@/lib/people-hooks";
-import { SYNTHESIS_LENSES, type Synthesis } from "@/lib/types";
+import { SYNTHESIS_LENSES, type MicrositeDocument } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 export default function NewSynthesisPage() {
   const router = useRouter();
   const documents = useProfilerStore((s) => s.documents ?? {});
-  const saveSynthesis = useProfilerStore((s) => s.saveSynthesis);
+  const saveDocument = useProfilerStore((s) => s.saveDocument);
 
   const [hydrated, setHydrated] = useState(false);
   useEffect(() => setHydrated(true), []);
@@ -103,8 +103,8 @@ export default function NewSynthesisPage() {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.error ?? `Generation failed (${res.status}).`);
       }
-      const { synthesis } = (await res.json()) as { synthesis: Synthesis };
-      saveSynthesis(synthesis);
+      const { synthesis } = (await res.json()) as { synthesis: MicrositeDocument };
+      saveDocument(synthesis);
       router.push(`/synthesis/${synthesis.id}`);
     } catch (e) {
       setError((e as Error).message);

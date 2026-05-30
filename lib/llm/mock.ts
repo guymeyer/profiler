@@ -7,7 +7,7 @@ import type {
   KeyRisk,
   PracticeQA,
   Customer,
-  ResearchArtifact,
+  ResearchDocument,
   OKR,
   ResearchCitation,
   OKRAlignmentNote,
@@ -22,7 +22,7 @@ export function buildMockRecommendation(args: {
   hasArtifact: boolean;
   intent?: string;
   customer?: Customer;
-  research?: ResearchArtifact[];
+  research?: ResearchDocument[];
   okrs?: OKR[];
 }): RecommendationResult {
   const {
@@ -400,7 +400,7 @@ function buildObjectiveOnlyMock(args: {
   hasArtifact: boolean;
   intent?: string;
   customer?: Customer;
-  research?: ResearchArtifact[];
+  research?: ResearchDocument[];
   okrs?: OKR[];
 }): RecommendationResult {
   const {
@@ -686,7 +686,7 @@ function buildObjectiveOnlyPracticeQA(
 // Cite the first sentence of each research summary as a finding, pinned to
 // the recommended framing. Crude but honest about the mock-mode trade-off.
 function buildMockResearchEvidence(
-  research?: ResearchArtifact[],
+  research?: ResearchDocument[],
   primary?: Person,
 ): ResearchCitation[] | undefined {
   if (!research || research.length === 0) return undefined;

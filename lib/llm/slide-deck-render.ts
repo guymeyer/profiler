@@ -1,4 +1,4 @@
-import type { Slide, SlideDeck } from "@/lib/types";
+import type { DeckDocument, Slide } from "@/lib/types";
 
 // Standalone HTML renderer for a SlideDeck. Used for download / open-in-tab.
 // Full-bleed slide deck with vanilla JS keyboard navigation, slide counter,
@@ -8,13 +8,14 @@ import type { Slide, SlideDeck } from "@/lib/types";
 // The in-app deck viewer renders natively — this output is for offline
 // presenting (open in a tab, F11 for full screen) and PDF export.
 
-export function renderDeckHtml(deck: SlideDeck): string {
-  const slidesHtml = deck.slides
-    .map((s, i) => renderSlide(s, i, deck.slides.length))
+export function renderDeckHtml(deck: DeckDocument): string {
+  const slides = deck.properties.slides;
+  const slidesHtml = slides
+    .map((s, i) => renderSlide(s, i, slides.length))
     .join("\n");
 
   const slidesNotesEmbedded = JSON.stringify(
-    deck.slides.map((s) => s.speakerNotes ?? ""),
+    slides.map((s) => s.speakerNotes ?? ""),
   );
 
   return `<!doctype html>
@@ -36,7 +37,7 @@ export function renderDeckHtml(deck: SlideDeck): string {
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg>
       </button>
       <div class="counter">
-        <span data-counter-cur>1</span> / <span data-counter-total>${deck.slides.length}</span>
+        <span data-counter-cur>1</span> / <span data-counter-total>${slides.length}</span>
       </div>
       <button type="button" class="nav-btn" data-nav="next" aria-label="Next slide">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
@@ -54,10 +55,10 @@ export function renderDeckHtml(deck: SlideDeck): string {
 
   <!-- Print-only handout layout: every slide laid out vertically with notes. -->
   <section class="print-handout">
-    ${deck.slides
+    ${slides
       .map(
         (s, i) => `<article class="handout-slide">
-        <div class="handout-num">${String(i + 1).padStart(2, "0")} / ${String(deck.slides.length).padStart(2, "0")} · ${esc(s.kind)}</div>
+        <div class="handout-num">${String(i + 1).padStart(2, "0")} / ${String(slides.length).padStart(2, "0")} · ${esc(s.kind)}</div>
         ${renderHandoutSlide(s)}
         ${s.speakerNotes ? `<div class="handout-notes"><strong>Notes:</strong> ${esc(s.speakerNotes)}</div>` : ""}
       </article>`,
