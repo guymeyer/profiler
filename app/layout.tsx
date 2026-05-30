@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
-import { ClerkProvider } from "@clerk/nextjs";
+// DEMO MODE: ClerkProvider removed so the app renders on Vercel without
+// Clerk env keys. Restore the import + wrapper when re-enabling auth.
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
@@ -46,13 +47,11 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <ClerkProvider>
-      <html
-        lang="en"
-        className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
-      >
-        <body className="min-h-full">{children}</body>
-      </html>
-    </ClerkProvider>
+    <html
+      lang="en"
+      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+    >
+      <body className="min-h-full">{children}</body>
+    </html>
   );
 }

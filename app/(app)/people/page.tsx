@@ -1,15 +1,20 @@
 "use client";
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { Plus, Search } from "lucide-react";
-import { PersonCard } from "@/components/people/person-card";
+import { Avatar } from "@/components/ui/avatar";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
+import { PageHeader } from "@/components/ui/page-header";
+import {
+  InlineDatabase,
+  type InlineDatabaseColumn,
+} from "@/components/ui/inline-database";
 import { useInternalPeople } from "@/lib/people-hooks";
 import { useProfilerStore } from "@/lib/store";
 import { PEOPLE } from "@/lib/data/people";
+import type { Person } from "@/lib/types";
+import { cn } from "@/lib/utils";
 
 export default function PeoplePage() {
   const [q, setQ] = useState("");
@@ -42,85 +47,142 @@ export default function PeoplePage() {
     PEOPLE.some((seed) => seed.id === c.id),
   ).length;
 
-  return (
-    <div className="max-w-7xl mx-auto">
-      <header className="mb-6 flex items-start justify-between gap-4 flex-wrap">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">
-            People directory
-          </h1>
-          <p className="text-muted-foreground mt-1">
-            Browse profiles for the people whose decisions you need to win.
-          </p>
+  const columns: InlineDatabaseColumn<Person>[] = [
+    {
+      key: "name",
+      label: "Name",
+      render: (p) => (
+        <div className="flex items-center gap-2.5">
+          <Avatar name={p.name} size={24} />
+          <span className="font-medium text-foreground">{p.name}</span>
         </div>
-        <Link href="/people/new">
-          <Button>
-            <Plus className="w-3.5 h-3.5" />
-            New person
-          </Button>
-        </Link>
-      </header>
+      ),
+      sortValue: (p) => p.name,
+    },
+    {
+      key: "title",
+      label: "Title",
+      kind: "muted",
+      render: (p) => p.title,
+      sortValue: (p) => p.title,
+    },
+    {
+      key: "team",
+      label: "Team",
+      kind: "muted",
+      width: "w-[200px]",
+      render: (p) => p.team,
+      sortValue: (p) => p.team,
+    },
+    {
+      key: "influence",
+      label: "Influence",
+      kind: "muted",
+      width: "w-[100px]",
+      render: (p) => p.influence,
+      sortValue: (p) => p.influence,
+    },
+    {
+      key: "tags",
+      label: "Tags",
+      width: "w-[180px]",
+      render: (p) => (
+        <div className="flex flex-wrap gap-1">
+          {p.tags.slice(0, 3).map((t) => (
+            <Badge key={t} tone="subtle">
+              {t}
+            </Badge>
+          ))}
+        </div>
+      ),
+    },
+  ];
+
+  return (
+    <div>
+      <PageHeader
+        title="People"
+        meta={
+          <>
+            {people.length} {people.length === 1 ? "profile" : "profiles"}
+            {overrideCount > 0 && (
+              <span className="text-muted-foreground">
+                {" "}
+                · {overrideCount} edited
+              </span>
+            )}
+            {customCount > 0 && (
+              <span className="text-muted-foreground">
+                {" "}
+                · {customCount} custom
+              </span>
+            )}
+          </>
+        }
+        actions={
+          <Link href="/people/new">
+            <Button>New person</Button>
+          </Link>
+        }
+      />
 
       <div className="flex flex-col gap-3 mb-6">
-        <div className="relative max-w-md">
-          <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="Search name, title, team, or tag…"
-            className="pl-9"
-          />
-        </div>
-        <div className="flex flex-wrap gap-1.5">
-          <button
-            onClick={() => setActiveTag(null)}
-            className={cn(
-              "rounded-full px-2.5 py-0.5 text-xs border transition-colors",
-              activeTag === null
-                ? "bg-foreground text-background border-foreground"
-                : "border-border text-muted-foreground hover:text-foreground",
-            )}
-          >
-            All
-          </button>
-          {allTags.map((t) => (
-            <button
-              key={t}
-              onClick={() => setActiveTag(t === activeTag ? null : t)}
-              className={cn(
-                "rounded-full px-2.5 py-0.5 text-xs border transition-colors",
-                activeTag === t
-                  ? "bg-foreground text-background border-foreground"
-                  : "border-border text-muted-foreground hover:text-foreground",
-              )}
-            >
-              {t}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {filtered.length === 0 ? (
-        <div className="text-sm text-muted-foreground py-12 text-center border border-dashed rounded-lg">
-          No people match those filters.
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filtered.map((p) => (
-            <PersonCard key={p.id} person={p} />
-          ))}
-        </div>
-      )}
-
-      <div className="mt-6 text-xs text-muted-foreground">
-        Showing {filtered.length} of {people.length} profiles ·{" "}
-        <Badge tone="subtle">prototype data</Badge>
-        {(customCount > 0 || overrideCount > 0) && (
-          <span className="ml-2">
-            · {customCount} custom · {overrideCount} edited
-          </span>
+        <Input
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="Search name, title, team, tags…"
+          className="max-w-md"
+        />
+        {allTags.length > 0 && (
+          <div className="flex flex-wrap gap-1">
+            <TagChip
+              label="All"
+              active={activeTag === null}
+              onClick={() => setActiveTag(null)}
+            />
+            {allTags.map((t) => (
+              <TagChip
+                key={t}
+                label={t}
+                active={activeTag === t}
+                onClick={() => setActiveTag(t === activeTag ? null : t)}
+              />
+            ))}
+          </div>
         )}
       </div>
+
+      <InlineDatabase
+        rows={filtered}
+        columns={columns}
+        rowHref={(p) => `/people/${p.id}`}
+        emptyLabel="No matching people."
+      />
     </div>
+  );
+}
+
+function TagChip({
+  label,
+  active,
+  onClick,
+}: {
+  label: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "rounded px-2 py-0.5 text-[12px] transition-colors",
+        active
+          ? "bg-foreground text-background"
+          : "text-muted-foreground hover:text-foreground hover:bg-accent",
+      )}
+    >
+      {label}
+    </button>
   );
 }

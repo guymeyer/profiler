@@ -2,25 +2,17 @@
 import { use, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import {
-  ArrowLeft,
-  Check,
-  X,
-  Sparkles,
-  MessageSquare,
-  Eye,
-  Zap,
-  ShieldAlert,
-  FileSearch,
-  Pencil,
-  RotateCcw,
-} from "lucide-react";
+import { ArrowLeft, RotateCcw } from "lucide-react";
 import { Avatar } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { PageHeader } from "@/components/ui/page-header";
+import { Section } from "@/components/ui/section";
 import { AddToAudience } from "@/components/audience/add-to-audience";
 import { RecentForPerson } from "@/components/people/recent-for-person";
+import { AutoBrief } from "@/components/auto-brief";
+import { Backlinks } from "@/components/backlinks";
 import { MarkdownEditor } from "@/components/admin/markdown-editor";
 import { useEffectivePerson } from "@/lib/people-hooks";
 import { useProfilerStore } from "@/lib/store";
@@ -29,6 +21,7 @@ import {
   personToMarkdown,
 } from "@/lib/profile-md";
 import { PEOPLE } from "@/lib/data/people";
+import type { Person } from "@/lib/types";
 
 interface Props {
   params: Promise<{ personId: string }>;
@@ -66,7 +59,6 @@ export default function PersonPage({ params }: Props) {
 
   useEffect(() => setHydrated(true), []);
 
-  // Sync draft when entering edit mode or person changes
   useEffect(() => {
     if (editing && person) {
       setDraft(personToMarkdown(person));
@@ -74,24 +66,22 @@ export default function PersonPage({ params }: Props) {
     }
   }, [editing, person]);
 
-  if (!hydrated || !person) {
-    if (hydrated && !person) {
-      return (
-        <div className="max-w-3xl mx-auto py-16 text-center">
-          <h1 className="text-xl font-semibold">Profile not found</h1>
-          <p className="text-muted-foreground mt-2">
-            This person doesn't exist in the seed library or your custom
-            profiles.
-          </p>
-          <div className="mt-6">
-            <Link href="/people">
-              <Button>Back to people</Button>
-            </Link>
-          </div>
+  if (!hydrated) return null;
+  if (!person) {
+    return (
+      <div className="py-16 text-center">
+        <h1 className="text-xl font-semibold">Profile not found</h1>
+        <p className="text-muted-foreground mt-2 text-[13px]">
+          This person doesn&apos;t exist in the seed library or your custom
+          profiles.
+        </p>
+        <div className="mt-6">
+          <Link href="/people">
+            <Button>Back to people</Button>
+          </Link>
         </div>
-      );
-    }
-    return null;
+      </div>
+    );
   }
 
   const isSeed = PEOPLE.some((p) => p.id === personId);
@@ -99,9 +89,10 @@ export default function PersonPage({ params }: Props) {
   const isCustom = !isSeed;
 
   function handleSave() {
-    const { person: parsed, warnings: parseWarnings } = markdownToPerson(draft, {
-      existingId: person!.id,
-    });
+    const { person: parsed, warnings: parseWarnings } = markdownToPerson(
+      draft,
+      { existingId: person!.id },
+    );
     setWarnings(parseWarnings);
     saveProfile(parsed);
     setEditing(false);
@@ -119,278 +110,346 @@ export default function PersonPage({ params }: Props) {
     router.push("/people");
   }
 
+  if (editing) {
+    return (
+      <div>
+        <BackLink />
+        <PageHeader eyebrow="Person" title="Edit profile" />
+        <p className="text-[13px] text-muted-foreground mb-4">
+          Profile is markdown. Top-of-file bullets set typed fields (influence,
+          communication style, tags). Each <code className="text-foreground">##</code>{" "}
+          heading is a section.
+        </p>
+        <MarkdownEditor
+          value={draft}
+          onChange={setDraft}
+          onSave={handleSave}
+          onCancel={() => setEditing(false)}
+          onDelete={isCustom ? handleDelete : undefined}
+          warnings={warnings}
+          saveLabel={isCustom ? "Save custom profile" : "Save override"}
+        />
+      </div>
+    );
+  }
+
   return (
-    <div className="max-w-6xl mx-auto">
-      <Link
-        href="/people"
-        className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-4"
-      >
-        <ArrowLeft className="w-3.5 h-3.5" />
-        All people
-      </Link>
-
-      <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-8">
-        {/* Left rail */}
-        <aside className="lg:sticky lg:top-20 lg:self-start space-y-5">
-          <div className="flex items-start gap-4">
-            <Avatar name={person.name} size={64} />
-            <div className="min-w-0">
-              <h1 className="text-xl font-semibold tracking-tight leading-tight">
-                {person.name}
-              </h1>
-              <div className="text-sm text-muted-foreground">
-                {person.title}
-              </div>
-              <div className="text-xs text-muted-foreground mt-0.5">
-                {person.team}
-              </div>
-              <div className="flex flex-wrap gap-1.5 mt-1.5">
-                {person.customerId && (
-                  <CustomerBadge customerId={person.customerId} />
-                )}
-                {(isOverridden || isCustom) && !person.customerId && (
-                  <Badge tone="primary">
-                    {isCustom ? "Custom" : "Edited"}
-                  </Badge>
-                )}
-              </div>
-            </div>
-          </div>
-
-          <div className="space-y-2">
-            <div className="text-xs uppercase tracking-wide text-muted-foreground font-medium">
-              Influence
-            </div>
-            <Badge tone="primary">{INFLUENCE_LABELS[person.influence]}</Badge>
-          </div>
-
-          <div className="space-y-2">
-            <div className="text-xs uppercase tracking-wide text-muted-foreground font-medium">
-              Communication style
-            </div>
-            <div className="flex flex-wrap gap-1.5">
-              {person.commStyle.map((c) => (
-                <Badge key={c} tone="neutral">
-                  {COMM_LABELS[c] ?? c}
-                </Badge>
-              ))}
-            </div>
-          </div>
-
-          {person.tags.length > 0 && (
-            <div className="space-y-2">
-              <div className="text-xs uppercase tracking-wide text-muted-foreground font-medium">
-                Tags
-              </div>
-              <div className="flex flex-wrap gap-1.5">
-                {person.tags.map((t) => (
-                  <Badge key={t} tone="subtle">
-                    {t}
-                  </Badge>
-                ))}
-              </div>
-            </div>
-          )}
-
-          <div className="space-y-2 pt-2">
-            <Link href={`/analyze?personIds=${person.id}`} className="block">
-              <Button className="w-full">
-                <FileSearch className="w-3.5 h-3.5" />
-                Analyze artifact for {person.name.split(" ")[0]}
-              </Button>
+    <div>
+      <BackLink />
+      <PageHeader
+        eyebrow="Person"
+        title={
+          <span className="flex items-center gap-3">
+            <Avatar name={person.name} size={36} />
+            {person.name}
+          </span>
+        }
+        meta={
+          <>
+            {person.title} · {person.team} ·{" "}
+            <span className="text-foreground/80">
+              {INFLUENCE_LABELS[person.influence]}
+            </span>
+            {person.customerId && (
+              <>
+                {" · "}
+                <CustomerLink customerId={person.customerId} />
+              </>
+            )}
+            {(isOverridden || isCustom) && !person.customerId && (
+              <>
+                {" · "}
+                <span className="text-foreground/80">
+                  {isCustom ? "Custom" : "Edited"}
+                </span>
+              </>
+            )}
+          </>
+        }
+        actions={
+          <>
+            <Link href={`/analyze?personIds=${person.id}`}>
+              <Button variant="secondary">Analyze for {person.name.split(" ")[0]}</Button>
             </Link>
             <AddToAudience personId={person.id} />
-          </div>
-
-          <div className="space-y-2 pt-2 border-t">
-            {!editing && (
-              <Button
-                variant="secondary"
-                className="w-full"
-                onClick={() => setEditing(true)}
-              >
-                <Pencil className="w-3.5 h-3.5" />
-                Edit profile
+            <Button variant="secondary" onClick={() => setEditing(true)}>
+              Edit
+            </Button>
+            {isOverridden && (
+              <Button variant="ghost" onClick={handleRevert}>
+                <RotateCcw className="w-3 h-3" />
+                Revert
               </Button>
             )}
-            {isOverridden && !editing && (
-              <Button
-                variant="secondary"
-                className="w-full text-muted-foreground"
-                onClick={handleRevert}
-              >
-                <RotateCcw className="w-3.5 h-3.5" />
-                Revert to seed
-              </Button>
-            )}
-          </div>
-
-          <RecentForPerson personId={person.id} />
-        </aside>
-
-        {/* Right content */}
-        <div className="space-y-6 min-w-0">
-          {editing ? (
-            <Card className="p-5">
-              <div className="mb-3">
-                <h2 className="font-semibold tracking-tight">Edit profile</h2>
-                <p className="text-xs text-muted-foreground mt-1">
-                  Profile is markdown. Top-of-file bullets set typed fields
-                  (influence, communication style, tags). Each <code>##</code>{" "}
-                  heading is a section.
-                </p>
-              </div>
-              <MarkdownEditor
-                value={draft}
-                onChange={setDraft}
-                onSave={handleSave}
-                onCancel={() => setEditing(false)}
-                onDelete={isCustom ? handleDelete : undefined}
-                warnings={warnings}
-                saveLabel={isCustom ? "Save custom profile" : "Save override"}
-              />
-            </Card>
-          ) : (
-            <ReadView person={person} />
+          </>
+        }
+      >
+        <div className="flex flex-wrap gap-2 text-[12px] text-muted-foreground items-center">
+          <span>Style:</span>
+          {person.commStyle.map((c) => (
+            <span key={c} className="text-foreground/80">
+              {COMM_LABELS[c] ?? c}
+            </span>
+          ))}
+          {person.tags.length > 0 && (
+            <>
+              <span className="mx-1">·</span>
+              <span>Tags:</span>
+              {person.tags.map((t) => (
+                <Badge key={t} tone="subtle">
+                  {t}
+                </Badge>
+              ))}
+            </>
           )}
         </div>
-      </div>
-    </div>
-  );
-}
+      </PageHeader>
 
-function ReadView({ person }: { person: import("@/lib/types").Person }) {
-  return (
-    <>
-      <Card className="p-6">
-        <div className="text-xs uppercase tracking-wide text-muted-foreground font-medium mb-2">
-          Overview
-        </div>
-        <p className="text-lg leading-relaxed">{person.summary}</p>
-      </Card>
+      <Section title="Summary">
+        <p className="text-[15px] leading-relaxed text-foreground/90">
+          {person.summary}
+        </p>
+      </Section>
 
-      <ProfileSection
-        icon={MessageSquare}
+      <SimpleListSection
         title="Communication preferences"
         items={person.reviewPreferences}
       />
-      <ProfileSection
-        icon={Eye}
+      <SimpleListSection
         title="Presentation preferences"
         items={person.visualPreferences}
       />
-      <ProfileSection
-        icon={Zap}
+      <SimpleListSection
         title="Decision triggers"
         items={person.decisionTriggers}
       />
-      <ProfileSection
-        icon={ShieldAlert}
+      <SimpleListSection
         title="Predictable objections"
         items={person.objections}
       />
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <Card className="p-5">
-          <div className="flex items-center gap-2 mb-3">
-            <div className="w-6 h-6 rounded-full bg-success/10 text-success inline-flex items-center justify-center">
-              <Check className="w-3.5 h-3.5" />
-            </div>
-            <h3 className="font-semibold">Do</h3>
-          </div>
-          <ul className="space-y-2">
+      {person.dos.length > 0 && (
+        <Section title="Do" divider>
+          <ul className="text-[14px] text-foreground/90 leading-relaxed space-y-1.5 list-disc pl-5">
             {person.dos.map((d, i) => (
-              <li
-                key={i}
-                className="text-sm leading-relaxed text-foreground/90"
-              >
-                {d}
-              </li>
+              <li key={i}>{d}</li>
             ))}
           </ul>
-        </Card>
-        <Card className="p-5">
-          <div className="flex items-center gap-2 mb-3">
-            <div className="w-6 h-6 rounded-full bg-danger/10 text-danger inline-flex items-center justify-center">
-              <X className="w-3.5 h-3.5" />
-            </div>
-            <h3 className="font-semibold">Don't</h3>
-          </div>
-          <ul className="space-y-2">
-            {person.donts.map((d, i) => (
-              <li
-                key={i}
-                className="text-sm leading-relaxed text-foreground/90"
-              >
-                {d}
-              </li>
-            ))}
-          </ul>
-        </Card>
-      </div>
+        </Section>
+      )}
 
-      <Card className="p-6">
-        <div className="flex items-center gap-2 mb-3">
-          <Sparkles className="w-4 h-4 text-primary" />
-          <h3 className="font-semibold">Example guidance</h3>
-        </div>
-        <ol className="space-y-4">
-          {person.exampleGuidance.map((g, i) => (
-            <li key={i} className="flex gap-3">
-              <span className="text-xs font-mono text-muted-foreground mt-1 shrink-0">
-                {String(i + 1).padStart(2, "0")}
-              </span>
-              <p className="text-sm leading-relaxed text-foreground/90">{g}</p>
-            </li>
-          ))}
-        </ol>
-      </Card>
-    </>
+      {person.donts.length > 0 && (
+        <Section title={"Don’t"} divider>
+          <ul className="text-[14px] text-foreground/90 leading-relaxed space-y-1.5 list-disc pl-5">
+            {person.donts.map((d, i) => (
+              <li key={i}>{d}</li>
+            ))}
+          </ul>
+        </Section>
+      )}
+
+      <ExpertiseSection person={person} />
+
+      {person.exampleGuidance.length > 0 && (
+        <Section title="Example guidance" divider>
+          <ol className="space-y-3 text-[14px] leading-relaxed">
+            {person.exampleGuidance.map((g, i) => (
+              <li key={i} className="flex gap-3">
+                <span className="text-[11px] font-mono text-muted-foreground tabular-nums shrink-0 pt-1">
+                  {String(i + 1).padStart(2, "0")}
+                </span>
+                <span className="text-foreground/90">{g}</span>
+              </li>
+            ))}
+          </ol>
+        </Section>
+      )}
+
+      <Section title="References" divider>
+        <Backlinks entity={{ kind: "person", id: person.id }} />
+      </Section>
+
+      <Section title="Recent analyses" divider>
+        <RecentForPerson personId={person.id} />
+      </Section>
+
+      <Section title="Brief" divider>
+        <PersonAutoBrief person={person} />
+      </Section>
+    </div>
   );
 }
 
-function CustomerBadge({ customerId }: { customerId: string }) {
-  const customer = useProfilerStore((s) => s.customers?.[customerId]);
-  if (!customer) {
-    return <Badge tone="subtle">Employee · unknown customer</Badge>;
-  }
+function BackLink() {
   return (
-    <Link href={`/customers/${customer.id}`}>
-      <Badge tone="primary" className="hover:opacity-80">
-        Employee at {customer.name}
-      </Badge>
+    <Link
+      href="/people"
+      className="inline-flex items-center gap-1 text-[12px] text-muted-foreground hover:text-foreground mb-3"
+    >
+      <ArrowLeft className="w-3 h-3" />
+      People
     </Link>
   );
 }
 
-function ProfileSection({
-  icon: Icon,
+function SimpleListSection({
   title,
   items,
 }: {
-  icon: React.ComponentType<{ className?: string }>;
   title: string;
   items: string[];
 }) {
   if (items.length === 0) return null;
   return (
-    <Card className="p-6">
-      <div className="flex items-center gap-2 mb-3">
-        <Icon className="w-4 h-4 text-muted-foreground" />
-        <h3 className="font-semibold">{title}</h3>
-      </div>
-      <ul className="space-y-2">
-        {items.map((item, i) => (
-          <li
-            key={i}
-            className="text-sm leading-relaxed text-foreground/90 flex gap-2.5"
-          >
-            <span className="text-muted-foreground mt-1.5 shrink-0">·</span>
-            {item}
-          </li>
+    <Section title={title} divider>
+      <ul className="text-[14px] text-foreground/90 leading-relaxed space-y-1.5 list-disc pl-5">
+        {items.map((i, idx) => (
+          <li key={idx}>{i}</li>
         ))}
       </ul>
-    </Card>
+    </Section>
   );
 }
 
+function CustomerLink({ customerId }: { customerId: string }) {
+  const customer = useProfilerStore((s) => s.customers?.[customerId]);
+  if (!customer) {
+    return <span className="text-muted-foreground">Customer employee</span>;
+  }
+  return (
+    <Link href={`/customers/${customer.id}`} className="link">
+      {customer.name} employee
+    </Link>
+  );
+}
+
+function ExpertiseSection({ person }: { person: Person }) {
+  const expertise = mergeUserAuto(
+    person.expertiseAreas,
+    person.expertiseAreasAuto,
+  );
+  const active = mergeUserAuto(person.activeWork, person.activeWorkAuto);
+  const interests = mergeUserAuto(person.interests, person.interestsAuto);
+  if (
+    expertise.entries.length === 0 &&
+    active.entries.length === 0 &&
+    interests.entries.length === 0
+  ) {
+    return null;
+  }
+  return (
+    <Section
+      title="Expertise"
+      subtitle="drives recommendations across the app"
+      divider
+    >
+      <div className="space-y-4">
+        <ExpertiseRow label="Areas" entries={expertise.entries} />
+        <ExpertiseRow label="Active work" entries={active.entries} />
+        <ExpertiseRow label="Interests" entries={interests.entries} />
+      </div>
+    </Section>
+  );
+}
+
+function mergeUserAuto(
+  user?: string[],
+  auto?: string[],
+): { entries: { value: string; auto: boolean }[] } {
+  const userSet = new Set((user ?? []).map((s) => s.toLowerCase()));
+  const entries: { value: string; auto: boolean }[] = [
+    ...(user ?? []).map((v) => ({ value: v, auto: false })),
+    ...(auto ?? [])
+      .filter((v) => !userSet.has(v.toLowerCase()))
+      .map((v) => ({ value: v, auto: true })),
+  ];
+  return { entries };
+}
+
+function ExpertiseRow({
+  label,
+  entries,
+}: {
+  label: string;
+  entries: { value: string; auto: boolean }[];
+}) {
+  if (entries.length === 0) return null;
+  return (
+    <div>
+      <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium mb-1.5">
+        {label}
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        {entries.map((e, i) => (
+          <Badge
+            key={i}
+            tone="subtle"
+            className="inline-flex items-center gap-1"
+            title={
+              e.auto
+                ? "Suggested by AI from linked artifacts"
+                : "Set on profile"
+            }
+          >
+            {e.value}
+            {e.auto && (
+              <span className="text-[9px] uppercase tracking-wider opacity-70">
+                ai
+              </span>
+            )}
+          </Badge>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function PersonAutoBrief({ person }: { person: Person }) {
+  const documents = useProfilerStore((s) => s.documents ?? {});
+  const customers = useProfilerStore((s) => s.customers ?? {});
+
+  const blocks = (() => {
+    const out: { label: string; body: string }[] = [];
+    for (const d of Object.values(documents)) {
+      if (!d.linkedPersonIds.includes(person.id)) continue;
+      if (d.kind === "research") {
+        out.push({
+          label: `Research: ${d.title}`,
+          body: `${d.summary}\n\n${d.content.slice(0, 1500)}`,
+        });
+      } else if (d.kind === "prd") {
+        out.push({
+          label: `PRD: ${d.title}`,
+          body: `Status: ${d.properties.status}\nProblem: ${d.properties.problem}\nSolution: ${d.properties.solution}\n${d.summary}`,
+        });
+      } else if (d.kind === "memo") {
+        out.push({
+          label: `Memo: ${d.title}`,
+          body: `${d.summary}\n${(d.properties.keyClaims ?? []).slice(0, 3).join("; ")}`,
+        });
+      }
+    }
+    if (person.customerId) {
+      const c = customers[person.customerId];
+      if (c) {
+        out.push({ label: `Customer: ${c.name}`, body: c.summary ?? "" });
+      }
+    }
+    out.push({
+      label: "Profile: stated preferences",
+      body: `Summary: ${person.summary}\nDecision triggers: ${person.decisionTriggers.join("; ")}\nObjections: ${person.objections.join("; ")}`,
+    });
+    return out;
+  })();
+
+  return (
+    <AutoBrief
+      subject={{
+        kind: "person",
+        name: person.name,
+        description: `${person.title} · ${person.team}`,
+      }}
+      contextBlocks={blocks}
+    />
+  );
+}

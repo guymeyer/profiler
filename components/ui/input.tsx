@@ -2,16 +2,19 @@
 import * as React from "react";
 import { cn } from "@/lib/utils";
 
+// Notion-shaped inputs: barely-bordered, no surface fill, focus is the only
+// loud state. Matches the Button size scale.
+
+const BASE =
+  "flex w-full rounded-md border border-border bg-transparent text-[13px] placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:border-ring disabled:cursor-not-allowed disabled:opacity-50";
+
 export const Input = React.forwardRef<
   HTMLInputElement,
   React.InputHTMLAttributes<HTMLInputElement>
 >(({ className, ...props }, ref) => (
   <input
     ref={ref}
-    className={cn(
-      "flex h-9 w-full rounded-md border border-input bg-surface px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:border-ring disabled:cursor-not-allowed disabled:opacity-50",
-      className,
-    )}
+    className={cn(BASE, "h-8 px-2.5", className)}
     {...props}
   />
 ));
@@ -24,7 +27,8 @@ export const Textarea = React.forwardRef<
   <textarea
     ref={ref}
     className={cn(
-      "flex w-full rounded-md border border-input bg-surface px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:border-ring disabled:cursor-not-allowed disabled:opacity-50 min-h-[100px] resize-y",
+      BASE,
+      "px-2.5 py-2 min-h-[80px] resize-y leading-relaxed",
       className,
     )}
     {...props}
@@ -38,10 +42,7 @@ export const Select = React.forwardRef<
 >(({ className, children, ...props }, ref) => (
   <select
     ref={ref}
-    className={cn(
-      "flex h-9 w-full rounded-md border border-input bg-surface px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:border-ring disabled:cursor-not-allowed disabled:opacity-50",
-      className,
-    )}
+    className={cn(BASE, "h-8 px-2", className)}
     {...props}
   >
     {children}

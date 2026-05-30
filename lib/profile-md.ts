@@ -20,6 +20,11 @@ const SECTION_ALIASES: Record<string, keyof Person> = {
   "do not": "donts",
   "example guidance": "exampleGuidance",
   examples: "exampleGuidance",
+  "expertise areas": "expertiseAreas",
+  expertise: "expertiseAreas",
+  "active work": "activeWork",
+  "current work": "activeWork",
+  interests: "interests",
 };
 
 const INFLUENCE_VALUES: InfluenceLevel[] = ["executive", "senior", "lead", "ic"];
@@ -58,6 +63,14 @@ export function personToMarkdown(p: Person): string {
   pushBullets(lines, "Do's", p.dos);
   pushBullets(lines, "Don'ts", p.donts);
   pushNumbered(lines, "Example guidance", p.exampleGuidance);
+  // Expertise dimensions — what this person knows. Distinct from the
+  // communication-shape sections above.
+  if ((p.expertiseAreas ?? []).length > 0)
+    pushBullets(lines, "Expertise areas", p.expertiseAreas ?? []);
+  if ((p.activeWork ?? []).length > 0)
+    pushBullets(lines, "Active work", p.activeWork ?? []);
+  if ((p.interests ?? []).length > 0)
+    pushBullets(lines, "Interests", p.interests ?? []);
   return lines.join("\n").trimEnd() + "\n";
 }
 
@@ -193,6 +206,9 @@ export function markdownToPerson(
     donts: [],
     exampleGuidance: [],
     tags,
+    expertiseAreas: [],
+    activeWork: [],
+    interests: [],
     customerId,
     rankWithinLevel,
   };

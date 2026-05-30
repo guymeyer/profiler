@@ -177,7 +177,7 @@ export async function analyzeArtifact(
   const response = await withRetry(() =>
     client.messages.create({
       model,
-      max_tokens: 2400,
+      max_tokens: 4096,
       system: [
         {
           type: "text",
@@ -339,7 +339,7 @@ export async function analyzeArtifactStreaming(
 
   const stream = client.messages.stream({
     model,
-    max_tokens: 2400,
+    max_tokens: 4096,
     system: [
       {
         type: "text",

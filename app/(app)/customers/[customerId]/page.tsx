@@ -37,7 +37,11 @@ import {
   sortByOrgChart,
 } from "@/lib/people-hooks";
 import { Avatar } from "@/components/ui/avatar";
-import type { Person } from "@/lib/types";
+import { AutoBrief } from "@/components/auto-brief";
+import { Backlinks } from "@/components/backlinks";
+import { PageHeader } from "@/components/ui/page-header";
+import { Section } from "@/components/ui/section";
+import type { Customer, Person } from "@/lib/types";
 
 interface Props {
   params: Promise<{ customerId: string }>;
@@ -127,72 +131,59 @@ export default function CustomerPage({ params }: Props) {
   }
 
   return (
-    <div className="max-w-5xl mx-auto">
+    <div>
       <Link
         href="/customers"
-        className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-4"
+        className="inline-flex items-center gap-1 text-[12px] text-muted-foreground hover:text-foreground mb-3"
       >
-        <ArrowLeft className="w-3.5 h-3.5" />
-        All customers
+        <ArrowLeft className="w-3 h-3" />
+        Customers
       </Link>
 
-      <header className="flex items-start justify-between gap-4 flex-wrap mb-6">
-        <div className="flex items-start gap-4 min-w-0">
-          <div className="w-14 h-14 rounded-lg bg-primary/10 text-primary inline-flex items-center justify-center shrink-0">
-            <Building2 className="w-6 h-6" />
-          </div>
-          <div className="min-w-0">
-            <h1 className="text-2xl font-semibold tracking-tight">
-              {customer.name}
-            </h1>
-            <div className="text-sm text-muted-foreground mt-0.5">
-              {[customer.industry, customer.size, customer.region]
-                .filter(Boolean)
-                .join(" · ") || "Unspecified"}
-            </div>
-            <div className="flex items-center gap-2 mt-2 flex-wrap">
-              <Badge tone={customer.source === "research" ? "primary" : "subtle"}>
-                {customer.source === "research" ? "Researched" : "Manual"}
-              </Badge>
-              {customer.researchedAt && (
-                <span className="text-[11px] text-muted-foreground">
-                  Researched {new Date(customer.researchedAt).toLocaleDateString()}
-                </span>
-              )}
-            </div>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2 flex-wrap">
-          <Button variant="secondary" onClick={handleUseInAudience}>
-            <FileSearch className="w-3.5 h-3.5" />
-            Use in audience
-          </Button>
-          <Button
-            variant="secondary"
-            onClick={handleReresearch}
-            disabled={researching}
-          >
-            {researching ? (
-              <>
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                Researching…
-              </>
-            ) : (
-              <>
-                <Sparkles className="w-3.5 h-3.5" />
-                Re-research
-              </>
+      <PageHeader
+        eyebrow="Customer"
+        title={customer.name}
+        meta={
+          <>
+            {[customer.industry, customer.size, customer.region]
+              .filter(Boolean)
+              .join(" · ") || "Unspecified"}
+            {" · "}
+            <span className="text-foreground/80">
+              {customer.source === "research" ? "Researched" : "Manual"}
+            </span>
+            {customer.researchedAt && (
+              <> · researched {new Date(customer.researchedAt).toLocaleDateString()}</>
             )}
-          </Button>
-          {!editing && (
-            <Button onClick={() => setEditing(true)}>
-              <Pencil className="w-3.5 h-3.5" />
-              Edit
+          </>
+        }
+        actions={
+          <>
+            <Button variant="secondary" onClick={handleUseInAudience}>
+              Use in audience
             </Button>
-          )}
-        </div>
-      </header>
+            <Button
+              variant="secondary"
+              onClick={handleReresearch}
+              disabled={researching}
+            >
+              {researching ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  Researching…
+                </>
+              ) : (
+                "Re-research"
+              )}
+            </Button>
+            {!editing && (
+              <Button variant="secondary" onClick={() => setEditing(true)}>
+                Edit
+              </Button>
+            )}
+          </>
+        }
+      />
 
       {researchError && (
         <Card className="p-4 mb-4 border-danger/30 bg-danger/[0.05]">
@@ -216,15 +207,20 @@ export default function CustomerPage({ params }: Props) {
           />
         </Card>
       ) : (
-        <div className="space-y-4">
-          <Card className="p-6">
-            <div className="text-xs uppercase tracking-wide text-muted-foreground font-medium mb-2">
-              Summary
-            </div>
-            <p className="text-lg leading-relaxed">
+        <div>
+          <Section title="Summary">
+            <p className="text-[15px] leading-relaxed text-foreground/90">
               {customer.summary || "No summary yet."}
             </p>
-          </Card>
+          </Section>
+
+          <Section title="Brief" divider>
+            <CustomerAutoBrief customer={customer} />
+          </Section>
+
+          <Section title="References" divider>
+            <Backlinks entity={{ kind: "customer", id: customer.id }} />
+          </Section>
 
           <CustomerList
             icon={Users}
@@ -258,21 +254,20 @@ export default function CustomerPage({ params }: Props) {
           />
 
           {customer.tags.length > 0 && (
-            <Card className="p-4">
-              <div className="text-xs uppercase tracking-wide text-muted-foreground font-medium mb-2">
-                Tags
-              </div>
-              <div className="flex flex-wrap gap-1.5">
+            <Section title="Tags" divider>
+              <div className="flex flex-wrap gap-1">
                 {customer.tags.map((t) => (
                   <Badge key={t} tone="subtle">
                     {t}
                   </Badge>
                 ))}
               </div>
-            </Card>
+            </Section>
           )}
 
-          <EmployeesSection customer={customer} />
+          <Section title="Employees" divider>
+            <EmployeesSection customer={customer} />
+          </Section>
         </div>
       )}
     </div>
@@ -309,16 +304,14 @@ function EmployeesSection({ customer }: { customer: import("@/lib/types").Custom
   }
 
   return (
-    <Card className="p-5">
+    <div>
       <div className="flex items-start justify-between gap-2 mb-4 flex-wrap">
-        <div className="flex items-center gap-2">
-          <Users className="w-4 h-4 text-muted-foreground" />
-          <h3 className="font-semibold">Employees</h3>
-          {employees.length > 0 && (
-            <Badge tone="subtle">{employees.length}</Badge>
-          )}
+        <div className="text-[12px] text-muted-foreground">
+          {employees.length === 0
+            ? "No employees yet."
+            : `${employees.length} on file`}
         </div>
-        <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex items-center gap-1.5 flex-wrap">
           <Button
             variant="secondary"
             size="sm"
@@ -331,37 +324,25 @@ function EmployeesSection({ customer }: { customer: import("@/lib/types").Custom
                 Researching…
               </>
             ) : employees.length === 0 ? (
-              <>
-                <Sparkles className="w-3.5 h-3.5" />
-                Discover stakeholders
-              </>
+              "Discover stakeholders"
             ) : (
-              <>
-                <RotateCcw className="w-3.5 h-3.5" />
-                Re-discover
-              </>
+              "Re-discover"
             )}
           </Button>
           <Link href={`/customers/${customer.id}/employees/new`}>
-            <Button size="sm">
-              <Plus className="w-3.5 h-3.5" />
-              Add employee
-            </Button>
+            <Button size="sm">Add employee</Button>
           </Link>
         </div>
       </div>
 
       {discoverError && (
-        <div className="rounded-md border border-danger/30 bg-danger/[0.05] p-3 text-sm text-danger flex items-start gap-2 mb-4">
-          <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
-          <span>{discoverError}</span>
-        </div>
+        <div className="text-[13px] text-danger mb-3">{discoverError}</div>
       )}
 
       {employees.length === 0 ? (
-        <div className="text-sm text-muted-foreground border border-dashed rounded-md p-6 text-center">
-          No employees yet. Run discovery to draft a roster from public sources,
-          or add stakeholders manually.
+        <div className="text-[13px] text-muted-foreground italic">
+          Run discovery to draft a roster from public sources, or add
+          stakeholders manually.
         </div>
       ) : (
         <div className="space-y-5">
@@ -387,7 +368,7 @@ function EmployeesSection({ customer }: { customer: import("@/lib/types").Custom
           </p>
         </div>
       )}
-    </Card>
+    </div>
   );
 }
 
@@ -528,33 +509,66 @@ function EmployeeRow({
 }
 
 function CustomerList({
-  icon: Icon,
   title,
   items,
 }: {
-  icon: React.ComponentType<{ className?: string }>;
+  icon?: React.ComponentType<{ className?: string }>;
   title: string;
   items: string[];
 }) {
   if (items.length === 0) return null;
   return (
-    <Card className="p-5">
-      <div className="flex items-center gap-2 mb-3">
-        <Icon className="w-4 h-4 text-muted-foreground" />
-        <h3 className="font-semibold">{title}</h3>
-      </div>
-      <ul className="space-y-2">
+    <Section title={title} divider>
+      <ul className="text-[14px] text-foreground/90 leading-relaxed list-disc pl-5 space-y-1.5">
         {items.map((item, i) => (
-          <li
-            key={i}
-            className="text-sm leading-relaxed text-foreground/90 flex gap-2.5"
-          >
-            <span className="text-muted-foreground mt-1.5 shrink-0">·</span>
-            {item}
-          </li>
+          <li key={i}>{item}</li>
         ))}
       </ul>
-    </Card>
+    </Section>
+  );
+}
+
+function CustomerAutoBrief({ customer }: { customer: Customer }) {
+  const documents = useProfilerStore((s) => s.documents ?? {});
+
+  const blocks: { label: string; body: string }[] = [];
+  for (const d of Object.values(documents)) {
+    if (!d.linkedCustomerIds.includes(customer.id)) continue;
+    if (d.kind === "research") {
+      blocks.push({
+        label: `Research: ${d.title}`,
+        body: `${d.summary}\n\n${d.content.slice(0, 1500)}`,
+      });
+    } else if (d.kind === "prd") {
+      blocks.push({
+        label: `PRD: ${d.title}`,
+        body: `Status: ${d.properties.status}\nProblem: ${d.properties.problem}\n${d.summary}`,
+      });
+    } else if (d.kind === "memo") {
+      blocks.push({
+        label: `Memo: ${d.title}`,
+        body: `${d.summary}\n${(d.properties.keyClaims ?? []).slice(0, 3).join("; ")}`,
+      });
+    }
+  }
+  if (customer.summary) {
+    blocks.push({
+      label: "Customer profile",
+      body: customer.summary,
+    });
+  }
+
+  return (
+    <AutoBrief
+      subject={{
+        kind: "customer",
+        name: customer.name,
+        description: [customer.industry, customer.size, customer.region]
+          .filter(Boolean)
+          .join(" · "),
+      }}
+      contextBlocks={blocks}
+    />
   );
 }
 

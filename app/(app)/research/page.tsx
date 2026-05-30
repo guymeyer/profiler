@@ -10,7 +10,7 @@ import { cn } from "@/lib/utils";
 import { useProfilerStore } from "@/lib/store";
 
 export default function ResearchPage() {
-  const research = useProfilerStore((s) => s.research ?? {});
+  const documents = useProfilerStore((s) => s.documents ?? {});
   const [hydrated, setHydrated] = useState(false);
   useEffect(() => setHydrated(true), []);
   const [q, setQ] = useState("");
@@ -18,11 +18,13 @@ export default function ResearchPage() {
 
   const list = useMemo(
     () =>
-      Object.values(research).sort(
-        (a, b) =>
-          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-      ),
-    [research],
+      Object.values(documents)
+        .filter((d) => d.kind === "research")
+        .sort(
+          (a, b) =>
+            new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+        ),
+    [documents],
   );
 
   const allTags = useMemo(() => {
@@ -32,14 +34,15 @@ export default function ResearchPage() {
   }, [list]);
 
   const filtered = list.filter((r) => {
+    if (r.kind !== "research") return false;
     if (activeTag && !r.tags.includes(activeTag)) return false;
     if (!q.trim()) return true;
     const hay = [
       r.title,
       r.summary,
       r.source,
-      r.methodology ?? "",
-      r.participants.join(" "),
+      r.properties.methodology ?? "",
+      r.properties.participants.join(" "),
       r.tags.join(" "),
     ]
       .join(" ")
@@ -132,7 +135,7 @@ export default function ResearchPage() {
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {filtered.map((r) => (
-                <Link key={r.id} href={`/research/${r.id}`}>
+                <Link key={r.id} href={`/documents/${r.id}`}>
                   <Card className="p-5 hover:border-primary/30 hover:shadow-sm transition-all h-full">
                     <div className="flex items-start justify-between gap-2 mb-2">
                       <h3 className="font-semibold leading-tight line-clamp-2">
@@ -142,8 +145,8 @@ export default function ResearchPage() {
                     </div>
                     <div className="text-[11px] text-muted-foreground mb-2">
                       {r.source}
-                      {r.conductedAt
-                        ? ` · ${new Date(r.conductedAt).toLocaleDateString(
+                      {r.kind === "research" && r.properties.conductedAt
+                        ? ` · ${new Date(r.properties.conductedAt).toLocaleDateString(
                             undefined,
                             { year: "numeric", month: "short" },
                           )}`
@@ -155,7 +158,7 @@ export default function ResearchPage() {
                       </p>
                     )}
                     {(r.tags.length > 0 ||
-                      r.participants.length > 0 ||
+                      (r.kind === "research" && r.properties.participants.length > 0) ||
                       r.linkedPersonIds.length > 0 ||
                       r.linkedCustomerIds.length > 0) && (
                       <div className="flex flex-wrap gap-1">

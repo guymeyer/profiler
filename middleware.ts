@@ -1,25 +1,18 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
-import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 
-// Middleware stack, applied in order:
+// DEMO MODE: Clerk middleware removed so the prototype runs on Vercel
+// without Clerk env keys. Restoration plan when re-enabling auth:
+//   1) reinstate `import { clerkMiddleware, createRouteMatcher } …`
+//   2) wrap the rate-limit body in `clerkMiddleware(async (auth, req) => …)`
+//   3) call `await auth.protect()` after the public-route check
+//   4) set NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY + CLERK_SECRET_KEY on Vercel
 //
-// 1. Per-IP rate limit on expensive POST requests. In-memory sliding window —
-//    survives only within one Edge function instance, so cold starts reset
-//    counters. A real shared limit needs Upstash Redis. This is fine for
-//    prototype traffic but isn't airtight against distributed abuse.
-//
-// 2. Clerk auth. Sign-in / sign-up routes are public. Everything else
-//    requires a signed-in user. Routes that require an active organization
-//    are enforced inside server components via requireWorkspace().
-//
-// 3. (Removed) Cloudflare Access JWT verification. We standardized on Clerk
-//    + Vercel-native protection; the CF Access middleware was deleted
-//    rather than left dormant.
+// The rate limit stays — per-IP, in-memory, production-only.
 
 // ─── Rate limit (per IP, in-memory, sliding window) ─────────────────────────
 
-const RATE_LIMIT_MAX = 10;
+const RATE_LIMIT_MAX = 200;
 const RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000;
 
 interface Bucket {
@@ -74,18 +67,7 @@ function rateLimitHeaders(remaining: number, resetAt: number) {
   };
 }
 
-// ─── Clerk auth + public route allowlist ────────────────────────────────────
-
-// Routes accessible without a Clerk session. Everything else is protected.
-const isPublicRoute = createRouteMatcher([
-  "/sign-in(.*)",
-  "/sign-up(.*)",
-  // Health checks if we add any later
-  "/api/health(.*)",
-]);
-
-export default clerkMiddleware(async (auth, req) => {
-  // Local dev keeps Clerk gating but skips rate limit so iteration is fast.
+export function middleware(req: NextRequest) {
   if (process.env.NODE_ENV === "production" && isExpensiveRequest(req)) {
     const ip = getClientIp(req);
     const { ok, remaining, resetAt } = consumeQuota(ip);
@@ -107,23 +89,12 @@ export default clerkMiddleware(async (auth, req) => {
         },
       );
     }
-    // Rate-limit headers are added to successful responses too; we can't
-    // mutate the Clerk-protected response easily, so we just continue.
   }
-
-  // Public routes: skip auth.
-  if (isPublicRoute(req)) return NextResponse.next();
-
-  // Everything else requires a session. The orgId / workspace check happens
-  // in server components via requireWorkspace() — sending users to
-  // /onboarding/company when they have a user but no active org.
-  await auth.protect();
   return NextResponse.next();
-});
+}
 
 export const config = {
   matcher: [
-    // Run on all paths except Next.js internals and static files.
     "/((?!_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml).*)",
   ],
 };

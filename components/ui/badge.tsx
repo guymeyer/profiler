@@ -1,27 +1,41 @@
 import * as React from "react";
 import { cn } from "@/lib/utils";
 
+// Notion-shaped badge: by default it's just muted inline text with no chrome.
+// Tone-driven backgrounds are reserved for the rare case where color
+// genuinely aids comprehension (stance, status, severity). Most callers
+// should just pass tone="subtle" and trust the muted text.
+
 type Tone = "neutral" | "primary" | "success" | "warning" | "danger" | "subtle";
 
 const tones: Record<Tone, string> = {
-  neutral:
-    "bg-muted text-muted-foreground border border-border",
-  subtle: "bg-transparent text-muted-foreground border border-border",
-  primary: "bg-primary/10 text-primary border border-primary/20",
-  success: "bg-success/10 text-success border border-success/20",
-  warning: "bg-warning/10 text-warning border border-warning/30",
-  danger: "bg-danger/10 text-danger border border-danger/20",
+  subtle: "text-muted-foreground",
+  neutral: "text-foreground/80",
+  // Tone-colored badges keep a very faint background tint + colored text.
+  // No borders — they read as inline labels, not buttons.
+  primary: "bg-primary/[0.08] text-primary",
+  success: "bg-success/[0.08] text-success",
+  warning: "bg-warning/[0.08] text-warning",
+  danger: "bg-danger/[0.08] text-danger",
 };
 
 export function Badge({
-  tone = "neutral",
+  tone = "subtle",
   className,
   ...props
 }: React.HTMLAttributes<HTMLSpanElement> & { tone?: Tone }) {
+  const colored =
+    tone === "primary" ||
+    tone === "success" ||
+    tone === "warning" ||
+    tone === "danger";
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium",
+        "inline-flex items-center gap-1 text-xs font-medium",
+        colored
+          ? "rounded px-1.5 py-0.5"
+          : "rounded px-1 py-0",
         tones[tone],
         className,
       )}

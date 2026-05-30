@@ -1,48 +1,40 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import {
-  LayoutDashboard,
-  Users,
-  Target,
-  UsersRound,
-  FileSearch,
-  Sparkles,
-  Building2,
-  BookOpen,
-  Flag,
-} from "lucide-react";
 import { cn } from "@/lib/utils";
 
+// Notion-shaped sidebar: text-only nav, no icons, no badges, minimal chrome.
+// Active item is a subtle background highlight. Spacing is generous.
+
 const NAV = [
-  { href: "/", label: "Home", icon: LayoutDashboard },
-  { href: "/people", label: "People", icon: Users },
-  { href: "/customers", label: "Customers", icon: Building2 },
-  { href: "/research", label: "Research", icon: BookOpen },
-  { href: "/objectives", label: "Objectives", icon: Target },
-  { href: "/okrs", label: "OKRs", icon: Flag },
-  { href: "/audience", label: "Audience builder", icon: UsersRound },
-  { href: "/analyze", label: "Analyze artifact", icon: FileSearch },
+  { href: "/", label: "Home" },
+  { href: "/people", label: "People" },
+  { href: "/customers", label: "Customers" },
+  { href: "/knowledge", label: "Knowledge" },
+  { href: "/objectives", label: "Objectives" },
+  { href: "/okrs", label: "OKRs" },
+  { href: "/audience", label: "Audience builder" },
+  { href: "/analyze", label: "Analyze artifact" },
+  { href: "/synthesis", label: "Synthesis" },
 ];
 
 export function Sidebar() {
   const pathname = usePathname();
   return (
-    <aside className="hidden md:flex md:w-60 lg:w-64 shrink-0 flex-col border-r bg-surface/40 backdrop-blur">
-      <div className="px-5 py-5 flex items-center gap-2">
-        <div className="w-8 h-8 rounded-md bg-primary text-primary-foreground inline-flex items-center justify-center">
-          <Sparkles className="w-4 h-4" />
-        </div>
-        <div className="flex flex-col leading-tight">
-          <span className="font-semibold tracking-tight">Profiler</span>
-          <span className="text-[11px] text-muted-foreground">
-            Audience intelligence
-          </span>
+    <aside className="hidden md:flex md:w-56 lg:w-60 shrink-0 flex-col border-r border-border bg-background">
+      <div className="px-5 pt-6 pb-5">
+        <Link
+          href="/"
+          className="text-[15px] font-semibold tracking-tight text-foreground"
+        >
+          Profiler
+        </Link>
+        <div className="text-[11px] text-muted-foreground mt-0.5">
+          Audience intelligence
         </div>
       </div>
-      <nav className="flex flex-col gap-0.5 px-2 mt-2">
+      <nav className="flex flex-col gap-px px-3 mt-1">
         {NAV.map((item) => {
-          const Icon = item.icon;
           const active =
             item.href === "/"
               ? pathname === "/"
@@ -52,21 +44,19 @@ export function Sidebar() {
               key={item.href}
               href={item.href}
               className={cn(
-                "flex items-center gap-2.5 px-3 py-2 rounded-md text-sm transition-colors",
+                "px-2 py-1 rounded text-[13px] transition-colors",
                 active
                   ? "bg-accent text-foreground font-medium"
                   : "text-muted-foreground hover:text-foreground hover:bg-accent/60",
               )}
             >
-              <Icon className="w-4 h-4 shrink-0" />
               {item.label}
             </Link>
           );
         })}
       </nav>
-      <div className="mt-auto px-4 py-4 text-[11px] text-muted-foreground border-t">
-        <div className="font-medium text-foreground/80 mb-1">Prototype</div>
-        Mock data · LLM-powered analysis · Phase 0–7 build complete
+      <div className="mt-auto px-5 py-4 text-[11px] text-muted-foreground border-t border-border">
+        Prototype · audience intelligence
       </div>
     </aside>
   );

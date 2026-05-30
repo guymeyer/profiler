@@ -1,3 +1,37 @@
+// Unified Document entity (kind=research|prd|memo|microsite|deck|…).
+// Lives in lib/types/document.ts and is re-exported here so callers can
+// keep importing from "@/lib/types". The legacy ResearchArtifact / PRD /
+// Memo interfaces below remain the source of truth for existing call
+// sites until the per-kind cutover lands.
+export type {
+  DocumentKind,
+  DocumentBase,
+  Document,
+  DocumentOfKind,
+  DocumentPropertiesOfKind,
+  ResearchProperties,
+  PRDProperties,
+  MemoProperties,
+  MicrositeProperties,
+  DeckProperties,
+  PostmortemProperties,
+  RFCProperties,
+  NoteProperties,
+  ResearchDocument,
+  PRDDocument,
+  MemoDocument,
+  MicrositeDocument,
+  DeckDocument,
+  PostmortemDocument,
+  RFCDocument,
+  NoteDocument,
+} from "@/lib/types/document";
+export {
+  DOCUMENT_KINDS,
+  DOCUMENT_KIND_LABELS,
+  isDocumentKind,
+} from "@/lib/types/document";
+
 export type InfluenceLevel = "executive" | "senior" | "lead" | "ic";
 
 export type CommStyle =
@@ -25,6 +59,21 @@ export interface Person {
   donts: string[];
   exampleGuidance: string[];
   tags: string[];
+
+  // Expertise dimensions — what this person KNOWS, distinct from how they
+  // want work presented to them. Used by the people-recommendations engine
+  // on artifact pages to suggest who else to talk to.
+  expertiseAreas?: string[]; // stable areas they're the SME for
+  activeWork?: string[]; // current focus, shifts quarterly
+  interests?: string[]; // topics they want to be looped in on
+  // Tags that were auto-suggested by LLM extraction from artifacts. Stored
+  // separately so the user can see what came from where; merged with the
+  // above arrays at read time. Additive only — extraction never overwrites
+  // tags the user typed.
+  expertiseAreasAuto?: string[];
+  activeWorkAuto?: string[];
+  interestsAuto?: string[];
+
   // When set, this person is an employee of the named customer rather than
   // someone on your own side. Drives where they appear in the directory.
   customerId?: string;
@@ -54,6 +103,92 @@ export interface Customer {
   createdAt: string;
 }
 
+// Memos are the catch-all narrative document — strategy memos, briefs,
+// post-mortems, market notes, anything that's neither structured research
+// nor a PRD. They live alongside research and PRDs in the Knowledge
+// repository.
+
+export type MemoKind =
+  | "strategy"
+  | "brief"
+  | "post-mortem"
+  | "market"
+  | "other";
+
+export const MEMO_KIND_LABELS: Record<MemoKind, string> = {
+  strategy: "Strategy",
+  brief: "Brief",
+  "post-mortem": "Post-mortem",
+  market: "Market / competitive",
+  other: "Other",
+};
+
+export interface Memo {
+  id: string;
+  title: string;
+  summary: string; // 1-3 sentence executive summary
+  memoKind: MemoKind;
+  keyClaims: string[]; // 3-6 distilled assertions the memo makes
+  decisions: string[]; // explicit decisions or recommendations the memo states
+  content: string; // full body markdown
+  source?: string; // owner / author / team
+
+  tags: string[];
+  linkedPersonIds: string[];
+  linkedCustomerIds: string[];
+  linkedObjectiveIds: string[];
+  linkedBusinessUnitId?: string;
+
+  uploadedFrom?: { filename: string; kind: string };
+  sourceUrl?: string; // when ingested from a URL rather than a file
+  locked?: boolean;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+// PRDs sit alongside research as a parallel document library. Where a
+// research artifact is OBSERVATION (what users did or said), a PRD is
+// INTENT (what we plan to build). Both share much of the same outer shape
+// — tags, links, body — but PRDs carry planning-specific fields the
+// research model doesn't need.
+
+export type PRDStatus = "draft" | "review" | "approved" | "shipped";
+
+export const PRD_STATUS_LABELS: Record<PRDStatus, string> = {
+  draft: "Draft",
+  review: "In review",
+  approved: "Approved",
+  shipped: "Shipped",
+};
+
+export interface PRD {
+  id: string;
+  title: string;
+  summary: string; // 1-3 sentence executive summary
+  problem: string; // problem statement
+  solution: string; // proposed solution
+  targetUsers: string[]; // segments / personas in scope
+  successMetrics: string[]; // target metrics, written
+  status: PRDStatus;
+  targetShipDate?: string; // ISO date best-guess
+
+  content: string; // full body markdown
+  source?: string; // owner / author / team
+
+  tags: string[];
+  linkedPersonIds: string[];
+  linkedCustomerIds: string[];
+  linkedObjectiveIds: string[];
+  linkedBusinessUnitId?: string; // scopes to a BU dashboard
+
+  uploadedFrom?: { filename: string; kind: string };
+  sourceUrl?: string; // when ingested from a public URL
+  // When true, the inline rich editor on the detail page becomes read-only.
+  locked?: boolean;
+  createdAt: string;
+  updatedAt?: string;
+}
+
 export interface ResearchArtifact {
   id: string;
   title: string;
@@ -68,6 +203,8 @@ export interface ResearchArtifact {
   linkedCustomerIds: string[];
   linkedObjectiveIds: string[];
   uploadedFrom?: { filename: string; kind: string };
+  sourceUrl?: string;         // when ingested from a public URL
+  locked?: boolean;
   createdAt: string;
   updatedAt?: string;
 }
@@ -214,4 +351,326 @@ export interface ResultFeedback {
   rating: "positive" | "negative";
   notes?: string;
   createdAt: string;
+}
+
+// ─── Research synthesis (microsite) ─────────────────────────────────────────
+// A static HTML microsite generated from N research reports. The microsite
+// contains one general read of the corpus plus a per-lens read for each of
+// the common enterprise organizations defined below. A dropdown in the
+// rendered page switches between lenses at view time.
+
+export type SynthesisLensId =
+  | "general"
+  | "product-design"
+  | "product-management"
+  | "engineering"
+  | "research"
+  | "marketing"
+  | "sales-cs"
+  | "executive";
+
+export interface SynthesisLens {
+  id: SynthesisLensId;
+  name: string;
+  // Short blurb shown in the dropdown / lens header.
+  brief: string;
+  // Longer guidance injected into the LLM prompt for this lens.
+  guidance: string;
+}
+
+// Common enterprise organizations. The "general" lens is the default — a
+// non-audience-specific synthesis. Every other lens reframes the same corpus
+// for a specific reader role.
+export const SYNTHESIS_LENSES: SynthesisLens[] = [
+  {
+    id: "general",
+    name: "General",
+    brief:
+      "An audience-agnostic read of the corpus. Start here, then switch lenses to see what each org should take away.",
+    guidance:
+      "Audience-agnostic synthesis. Surface the through-line of the corpus, the strongest evidence, and the most consequential implications without favoring any single function. Treat this as the version a cross-functional leader would read first.",
+  },
+  {
+    id: "product-design",
+    name: "Product Design",
+    brief: "User reality, mental models, friction patterns, design problems to solve.",
+    guidance:
+      "Read this corpus as a product designer. Surface user behavior, mental models, friction patterns, and jobs-to-be-done. Call out where current design intuition is thin or wrong. Frame insights as design problems to solve, not findings to file.",
+  },
+  {
+    id: "product-management",
+    name: "Product Management",
+    brief: "Unmet need, prioritization, trade-offs the roadmap should reflect.",
+    guidance:
+      "Read this corpus as a product manager. Surface unmet needs, willingness-to-pay signals, segmentation cues, and trade-offs the roadmap should reflect. Translate qualitative signal into product decisions (build, defer, kill, or learn-more).",
+  },
+  {
+    id: "engineering",
+    name: "Engineering",
+    brief: "Capability gaps and what user reality implies for the platform.",
+    guidance:
+      "Read this corpus as an engineering leader. Surface what user reality implies for architecture, reliability, performance, integration surface, and technical debt. Translate user pain into capability gaps and the smallest investment that closes each.",
+  },
+  {
+    id: "research",
+    name: "Research",
+    brief: "Evidence strength, methodological gaps, what to study next.",
+    guidance:
+      "Read this corpus as a research lead. Surface methodological strengths and weaknesses, where claims are over- or under-supported, and the studies that should come next. Treat this as a meta-review of the corpus.",
+  },
+  {
+    id: "marketing",
+    name: "Marketing & Comms",
+    brief: "The story, the positioning, the narrative this evidence earns.",
+    guidance:
+      "Read this corpus as a marketing leader. Surface the story arc the evidence supports, the positioning shifts it warrants, and the narratives competitors cannot credibly claim. Distinguish between what's earned by evidence and what would be aspirational.",
+  },
+  {
+    id: "sales-cs",
+    name: "Sales & Customer Success",
+    brief: "Deal motion, expansion paths, churn risk.",
+    guidance:
+      "Read this corpus as a go-to-market leader. Surface deal-motion implications, expansion opportunities, and churn risks. Where research describes friction, name the deal stage it shows up in and the play that addresses it.",
+  },
+  {
+    id: "executive",
+    name: "Executive Leadership",
+    brief: "Strategic shape and decisions only leadership can make.",
+    guidance:
+      "Read this corpus as an executive sponsor. Surface strategic implications, risks to objectives, the smallest set of decisions that would change the trajectory, and what to escalate. Compress, do not summarize.",
+  },
+];
+
+export const SYNTHESIS_LENS_BY_ID: Record<SynthesisLensId, SynthesisLens> =
+  Object.fromEntries(SYNTHESIS_LENSES.map((l) => [l.id, l])) as Record<
+    SynthesisLensId,
+    SynthesisLens
+  >;
+
+// Structured outline returned by the model. The HTML is built from this
+// deterministically — see lib/llm/synthesize-render.ts.
+export interface SynthesisInsight {
+  headline: string;
+  body: string;
+  citations?: string[]; // research report titles backing this claim
+}
+
+export interface SynthesisLensSection {
+  summary: string; // 2-4 sentence read-for-this-lens framing
+  hmwQuestions: string[]; // 3-5 "How might we..." questions scoped to this lens
+  insights: SynthesisInsight[]; // ranked insights for this lens
+  implications: string[]; // bullet-style implications / actions
+  tensions: string[]; // gaps, disagreements, weak evidence
+  next: string[]; // smallest set of next moves
+}
+
+export interface SynthesisOutline {
+  title: string;
+  overview: string; // lens-independent corpus overview (1-2 paragraphs)
+  lenses: Partial<Record<SynthesisLensId, SynthesisLensSection>>;
+  // Optional per-person "microscopic" lenses. Each carries two depths so
+  // the viewer can switch between a full brief and an executive summary.
+  people?: PersonLensSection[];
+  sources: { title: string; summary: string }[];
+}
+
+// Per-person lens — a microscopic reframe using the named individual's full
+// profile (communication preferences, decision triggers, objections, do's
+// and don'ts). Has two depths the viewer toggles between.
+export type PersonLensDepth = "brief" | "exec";
+
+export interface PersonExecutiveSummary {
+  tldr: string; // 1-2 sentences — what this person should walk away knowing
+  keyPoints: string[]; // 2-4 must-know bullets, ranked
+  callToAction: string; // the single most consequential next move for them
+}
+
+export interface PersonLensSection {
+  personId: string;
+  personName: string; // baked in so the outline survives a person rename
+  fullBrief: SynthesisLensSection; // same depth as a functional lens
+  executiveSummary: PersonExecutiveSummary; // compressed for <60s reads
+}
+
+export interface Synthesis {
+  id: string;
+  title: string;
+  researchIds: string[];
+  outline: SynthesisOutline;
+  html: string; // rendered from outline; cached for direct iframe srcDoc
+  modifier?: string; // last "regenerate with modifier" prompt
+  generatedBy: "anthropic" | "mock";
+  model?: string;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+// ─── Slide decks (presentation derivative of a synthesis) ───────────────────
+// A deck is a compression of a synthesis for a specific audience. Many
+// decks per synthesis (one per audience) is the persistence model — the
+// same research can be presented three different ways without losing prior
+// cuts.
+
+export type SlideKind =
+  | "title"
+  | "setup"
+  | "insight"
+  | "implication"
+  | "quote"
+  | "decision"
+  | "sources"
+  | "narrative"; // open prose slot for slides where bullets don't fit
+
+export const SLIDE_KIND_LABELS: Record<SlideKind, string> = {
+  title: "Title",
+  setup: "Setup",
+  insight: "Insight",
+  implication: "Implication",
+  quote: "Quote",
+  decision: "Decision",
+  sources: "Sources",
+  narrative: "Narrative",
+};
+
+export interface Slide {
+  kind: SlideKind;
+  title: string;
+  subtitle?: string;
+  bullets?: string[]; // 1-4 bullets, each ≤ ~12 words
+  quote?: { text: string; attribution?: string };
+  citations?: string[]; // source titles referenced
+  body?: string; // for narrative slides — a short paragraph
+  speakerNotes?: string; // shown below slide in-app, embedded in export
+}
+
+// Audience snapshot baked into the deck so a deck stays valid even if the
+// underlying selections change later.
+export interface DeckAudience {
+  personIds: string[];
+  objectiveIds: string[];
+  intent?: string;
+}
+
+export interface SlideDeck {
+  id: string;
+  synthesisId: string;
+  title: string;
+  audience: DeckAudience;
+  slides: Slide[];
+  generatedBy: "anthropic" | "mock";
+  model?: string;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+// ─── Derived metrics + BU recommendations ───────────────────────────────────
+// Metrics are extracted (by an LLM step) from research artifacts. They are
+// not user-entered: a research report that mentions "AI Agent builder usage
+// down 32%" yields a DerivedMetric tied to that research and to the
+// inferred business unit. Multiple research artifacts mentioning the same
+// metric for the same BU form a trend.
+
+export type MetricKind =
+  | "engagement"
+  | "adoption"
+  | "retention"
+  | "satisfaction"
+  | "performance"
+  | "revenue"
+  | "support"
+  | "other";
+
+export const METRIC_KIND_LABELS: Record<MetricKind, string> = {
+  engagement: "Engagement",
+  adoption: "Adoption",
+  retention: "Retention",
+  satisfaction: "Satisfaction",
+  performance: "Performance",
+  revenue: "Revenue",
+  support: "Support",
+  other: "Other",
+};
+
+export type MetricChangeDirection = "up" | "down" | "flat" | "unknown";
+export type MetricChangeUnit = "pct" | "absolute" | "ratio";
+export type MetricSentiment = "positive" | "negative" | "neutral";
+
+// "observed" = pulled from research (what was), "target" = pulled from a
+// PRD success metric (what we want). The BU dashboard groups both by
+// canonical metric name, so a target sits alongside its observed trajectory.
+export type MetricObservationType = "observed" | "target";
+
+// What kind of document the metric was extracted from. The grouping logic
+// on the BU dashboard treats all sources uniformly, but UI can label.
+export type MetricSourceKind = "research" | "prd" | "memo";
+
+export interface DerivedMetric {
+  id: string;
+
+  // Identity — name should be canonical enough that two extractions across
+  // documents naturally collide for dedup-by-name on the dashboard.
+  name: string;
+  kind: MetricKind;
+  unit?: string; // "%", "users", "days", "$", "score"
+
+  // Observation as stated in the source document
+  value?: number; // headline value if stated (e.g. 4200 active users)
+  changeDirection: MetricChangeDirection;
+  changeMagnitude?: number; // size of the change (e.g. 32 for "down 32%")
+  changeUnit?: MetricChangeUnit;
+  sentiment: MetricSentiment;
+
+  observationType: MetricObservationType; // observed (default) | target
+  periodLabel: string;
+  asOfDate?: string;
+
+  // Linkage / provenance
+  sourceKind: MetricSourceKind; // research | prd — what document type produced this
+  sourceDocumentId: string; // document id (any kind — research/prd/memo). Single column so per-source-kind dedup logic stays simple.
+  businessUnitId?: string;
+  linkedObjectiveIds?: string[];
+  evidenceQuote?: string;
+
+  generatedBy: "anthropic" | "mock";
+  createdAt: string;
+}
+
+export type BURecommendationStance =
+  | "amplify" // good trend, research validates, scale
+  | "guard" // good trend, fragility — preserve the gain
+  | "pivot" // bad trend, research explains why, change course
+  | "investigate" // unclear signal, study before acting
+  | "escalate"; // off-track + against objectives, leadership decision
+
+export const BU_STANCE_LABELS: Record<BURecommendationStance, string> = {
+  amplify: "Amplify",
+  guard: "Guard",
+  pivot: "Pivot",
+  investigate: "Investigate",
+  escalate: "Escalate",
+};
+
+export interface BURecommendationItem {
+  stance: BURecommendationStance;
+  headline: string;
+  rationale: string;
+  // Which metrics this recommendation rests on (by id).
+  metricIds: string[];
+  // Citation chips. Each citation includes a one-line "relevance" so we
+  // know how the cited thing supports this recommendation.
+  researchCitations: { researchId: string; relevance: string }[];
+  objectiveCitations: { objectiveId: string; relevance: string }[];
+  okrCitations: { okrId: string; relevance: string }[];
+  nextActions: string[];
+  risks: string[];
+}
+
+export interface BURecommendationSet {
+  id: string;
+  businessUnitId: string;
+  summary: string; // 2-3 sentence overall narrative for the BU
+  recommendations: BURecommendationItem[]; // 2-5 ranked
+  generatedAt: string;
+  generatedBy: "anthropic" | "mock";
+  model?: string;
 }

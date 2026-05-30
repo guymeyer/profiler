@@ -6,10 +6,75 @@ import type {
   ResultFeedback,
   Person,
   Customer,
-  ResearchArtifact,
   BusinessUnit,
   OKR,
+  Synthesis,
+  DerivedMetric,
+  BURecommendationSet,
+  SlideDeck,
+  Document,
 } from "@/lib/types";
+import { migrateV1ToV2 } from "@/lib/store-migrations";
+
+// Adapters for synthesis + deck: their primary store slice (the bespoke
+// viewer reads from `syntheses` / `decks` for now) writes a Document
+// mirror so the unified `documents` index sees them too.
+function synthesisToDocument(s: Synthesis): Document {
+  return {
+    id: s.id,
+    kind: "microsite",
+    title: s.title,
+    summary: "",
+    content: "",
+    tags: [],
+    linkedPersonIds: [],
+    linkedCustomerIds: [],
+    linkedObjectiveIds: [],
+    createdAt: s.createdAt,
+    updatedAt: s.updatedAt,
+    properties: {
+      researchIds: s.researchIds,
+      outline: s.outline,
+      html: s.html,
+      modifier: s.modifier,
+      generatedBy: s.generatedBy,
+      model: s.model,
+    },
+  };
+}
+
+function deckToDocument(d: SlideDeck): Document {
+  return {
+    id: d.id,
+    kind: "deck",
+    title: d.title,
+    summary: "",
+    content: "",
+    tags: [],
+    linkedPersonIds: [],
+    linkedCustomerIds: [],
+    linkedObjectiveIds: [],
+    createdAt: d.createdAt,
+    updatedAt: d.updatedAt,
+    properties: {
+      synthesisId: d.synthesisId,
+      audience: d.audience,
+      slides: d.slides,
+      generatedBy: d.generatedBy,
+      model: d.model,
+    },
+  };
+}
+
+function dropFromDocuments(
+  documents: Record<string, Document>,
+  id: string,
+): Record<string, Document> {
+  if (!(id in documents)) return documents;
+  const next = { ...documents };
+  delete next[id];
+  return next;
+}
 
 interface AudienceSelection {
   personIds: string[];
@@ -79,10 +144,9 @@ interface ProfilerStore {
   selectedCustomerId?: string;
   setSelectedCustomerId: (id: string | undefined) => void;
 
-  // Research
-  research: Record<string, ResearchArtifact>;
-  saveResearch: (r: ResearchArtifact) => void;
-  deleteResearch: (id: string) => void;
+  // Document selection cursor used by audience-builder / synthesis flows.
+  // Keyed off document ids regardless of kind — kept on the store so
+  // selections survive across page transitions.
   selectedResearchIds: string[];
   toggleResearch: (id: string) => void;
   clearSelectedResearch: () => void;
@@ -99,6 +163,40 @@ interface ProfilerStore {
   selectedOKRIds: string[];
   toggleOKR: (id: string) => void;
   clearSelectedOKRs: () => void;
+
+  // Research syntheses (microsites)
+  syntheses: Record<string, Synthesis>;
+  saveSynthesis: (s: Synthesis) => void;
+  deleteSynthesis: (id: string) => void;
+
+  // Derived metrics (auto-extracted from research / PRDs / memos)
+  metrics: Record<string, DerivedMetric>;
+  // Replace ALL metrics tied to one document. Used by extract flows so
+  // re-running extraction on a document doesn't leave stale rows. Three
+  // entry points for now — they share filter logic by sourceKind.
+  replaceMetricsForResearch: (documentId: string, next: DerivedMetric[]) => void;
+  replaceMetricsForPRD: (documentId: string, next: DerivedMetric[]) => void;
+  replaceMetricsForMemo: (documentId: string, next: DerivedMetric[]) => void;
+  deleteMetric: (id: string) => void;
+
+  // BU-level recommendation rollups, one per businessUnitId.
+  buRecommendations: Record<string, BURecommendationSet>;
+  saveBURecommendations: (r: BURecommendationSet) => void;
+  deleteBURecommendations: (businessUnitId: string) => void;
+
+  // Slide decks — presentation derivatives of a synthesis. Many per
+  // synthesis (one per audience). The deck viewer is bespoke, so decks
+  // keep their own slice in addition to surfacing as `kind: "deck"`
+  // documents in the `documents` index.
+  decks: Record<string, SlideDeck>;
+  saveDeck: (d: SlideDeck) => void;
+  deleteDeck: (id: string) => void;
+
+  // Unified documents — the source of truth for research, PRDs, memos,
+  // microsites, decks, and future kinds (postmortem/rfc/note).
+  documents: Record<string, Document>;
+  saveDocument: (d: Document) => void;
+  deleteDocument: (id: string) => void;
 }
 
 export const useProfilerStore = create<ProfilerStore>()(
@@ -218,18 +316,6 @@ export const useProfilerStore = create<ProfilerStore>()(
       selectedCustomerId: undefined,
       setSelectedCustomerId: (id) => set({ selectedCustomerId: id }),
 
-      research: {},
-      saveResearch: (r) =>
-        set((s) => ({ research: { ...s.research, [r.id]: r } })),
-      deleteResearch: (id) =>
-        set((s) => {
-          const next = { ...s.research };
-          delete next[id];
-          return {
-            research: next,
-            selectedResearchIds: s.selectedResearchIds.filter((x) => x !== id),
-          };
-        }),
       selectedResearchIds: [],
       toggleResearch: (id) =>
         set((s) => ({
@@ -277,10 +363,135 @@ export const useProfilerStore = create<ProfilerStore>()(
             : [...s.selectedOKRIds, id],
         })),
       clearSelectedOKRs: () => set({ selectedOKRIds: [] }),
+
+      syntheses: {},
+      saveSynthesis: (s) =>
+        set((state) => ({
+          syntheses: { ...state.syntheses, [s.id]: s },
+          documents: { ...state.documents, [s.id]: synthesisToDocument(s) },
+        })),
+      deleteSynthesis: (id) =>
+        set((state) => {
+          const next = { ...state.syntheses };
+          delete next[id];
+          return {
+            syntheses: next,
+            documents: dropFromDocuments(state.documents, id),
+          };
+        }),
+
+      metrics: {},
+      replaceMetricsForResearch: (researchId, next) =>
+        set((state) => {
+          const remaining: Record<string, DerivedMetric> = {};
+          for (const [id, m] of Object.entries(state.metrics)) {
+            if (
+              !(m.sourceKind === "research" && m.sourceDocumentId === researchId)
+            ) {
+              remaining[id] = m;
+            }
+          }
+          for (const m of next) remaining[m.id] = m;
+          return { metrics: remaining };
+        }),
+      deleteMetric: (id) =>
+        set((state) => {
+          const next = { ...state.metrics };
+          delete next[id];
+          return { metrics: next };
+        }),
+
+      buRecommendations: {},
+      saveBURecommendations: (r) =>
+        set((state) => ({
+          buRecommendations: {
+            ...state.buRecommendations,
+            [r.businessUnitId]: r,
+          },
+        })),
+      deleteBURecommendations: (businessUnitId) =>
+        set((state) => {
+          const next = { ...state.buRecommendations };
+          delete next[businessUnitId];
+          return { buRecommendations: next };
+        }),
+
+      replaceMetricsForPRD: (documentId, next) =>
+        set((state) => {
+          const remaining: Record<string, DerivedMetric> = {};
+          for (const [id, m] of Object.entries(state.metrics)) {
+            if (!(m.sourceKind === "prd" && m.sourceDocumentId === documentId)) {
+              remaining[id] = m;
+            }
+          }
+          for (const m of next) remaining[m.id] = m;
+          return { metrics: remaining };
+        }),
+
+      replaceMetricsForMemo: (documentId, next) =>
+        set((state) => {
+          const remaining: Record<string, DerivedMetric> = {};
+          for (const [id, m] of Object.entries(state.metrics)) {
+            if (!(m.sourceKind === "memo" && m.sourceDocumentId === documentId)) {
+              remaining[id] = m;
+            }
+          }
+          for (const m of next) remaining[m.id] = m;
+          return { metrics: remaining };
+        }),
+
+      decks: {},
+      saveDeck: (d) =>
+        set((state) => ({
+          decks: { ...state.decks, [d.id]: d },
+          documents: { ...state.documents, [d.id]: deckToDocument(d) },
+        })),
+      deleteDeck: (id) =>
+        set((state) => {
+          const next = { ...state.decks };
+          delete next[id];
+          return {
+            decks: next,
+            documents: dropFromDocuments(state.documents, id),
+          };
+        }),
+
+      documents: {},
+      saveDocument: (d) =>
+        set((state) => ({ documents: { ...state.documents, [d.id]: d } })),
+      deleteDocument: (id) =>
+        set((state) => {
+          const next = { ...state.documents };
+          delete next[id];
+          // Drop metrics tied to this document so removing a research/PRD/
+          // memo doesn't leave orphan rows on the BU dashboard.
+          const remainingMetrics: Record<string, DerivedMetric> = {};
+          for (const [mid, m] of Object.entries(state.metrics)) {
+            if (m.sourceDocumentId !== id) remainingMetrics[mid] = m;
+          }
+          return {
+            documents: next,
+            metrics: remainingMetrics,
+            selectedResearchIds: state.selectedResearchIds.filter(
+              (x) => x !== id,
+            ),
+          };
+        }),
     }),
     {
-      name: "profiler-store-v1",
+      name: "profiler-store-v2",
+      version: 2,
       storage: createJSONStorage(() => localStorage),
+      migrate: (persisted, fromVersion) => {
+        try {
+          if (fromVersion < 2) return migrateV1ToV2(persisted);
+        } catch (err) {
+          if (typeof console !== "undefined") {
+            console.error("[profiler-store] migration failed:", err);
+          }
+        }
+        return persisted as Record<string, unknown>;
+      },
     },
   ),
 );

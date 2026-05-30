@@ -572,7 +572,7 @@ function ResearchCitationRow({
 }: {
   citation: import("@/lib/types").ResearchCitation;
 }) {
-  const research = useProfilerStore((s) => s.research?.[citation.researchId]);
+  const research = useProfilerStore((s) => s.documents?.[citation.researchId]);
   return (
     <li className="rounded-md border p-4 bg-surface/40">
       <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
@@ -580,7 +580,7 @@ function ResearchCitationRow({
           <BookOpen className="w-3.5 h-3.5 text-primary shrink-0" />
           {research ? (
             <Link
-              href={`/research/${research.id}`}
+              href={`/documents/${research.id}`}
               className="hover:underline truncate"
             >
               {research.title}

@@ -74,7 +74,7 @@ export default function AudiencePage() {
       )
     : [];
 
-  const research = useProfilerStore((s) => s.research ?? {});
+  const documents = useProfilerStore((s) => s.documents ?? {});
   const selectedResearchIds = useProfilerStore((s) => s.selectedResearchIds ?? []);
   const toggleResearch = useProfilerStore((s) => s.toggleResearch);
   const okrs = useProfilerStore((s) => s.okrs ?? {});
@@ -83,13 +83,14 @@ export default function AudiencePage() {
   const toggleOKR = useProfilerStore((s) => s.toggleOKR);
 
   // Research artifacts ranked: linked-to-current-selection first, then everything else.
-  const researchSuggested = Object.values(research).filter(
+  const allResearch = Object.values(documents).filter((d) => d.kind === "research");
+  const researchSuggested = allResearch.filter(
     (r) =>
       r.linkedPersonIds.some((id) => personIds.includes(id)) ||
       (selectedCustomerId && r.linkedCustomerIds.includes(selectedCustomerId)) ||
       r.linkedObjectiveIds.some((id) => objectiveIds.includes(id)),
   );
-  const researchOther = Object.values(research).filter(
+  const researchOther = allResearch.filter(
     (r) => !researchSuggested.includes(r),
   );
 
@@ -399,7 +400,7 @@ export default function AudiencePage() {
               Inject internal research as primary-source evidence. The model
               must cite anything you attach here.
             </p>
-            {Object.keys(research).length === 0 ? (
+            {allResearch.length === 0 ? (
               <div className="text-sm text-muted-foreground">
                 No research yet.{" "}
                 <Link href="/research/new" className="text-primary hover:underline">
@@ -744,7 +745,7 @@ function ResearchRows({
   selected,
   onToggle,
 }: {
-  list: import("@/lib/types").ResearchArtifact[];
+  list: import("@/lib/types").ResearchDocument[];
   selected: string[];
   onToggle: (id: string) => void;
 }) {
@@ -773,8 +774,8 @@ function ResearchRows({
                 </div>
                 <div className="text-[11px] text-muted-foreground truncate">
                   {r.source}
-                  {r.conductedAt
-                    ? ` · ${new Date(r.conductedAt).toLocaleDateString(undefined, { year: "numeric", month: "short" })}`
+                  {r.properties.conductedAt
+                    ? ` · ${new Date(r.properties.conductedAt).toLocaleDateString(undefined, { year: "numeric", month: "short" })}`
                     : ""}
                 </div>
               </div>

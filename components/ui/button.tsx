@@ -2,24 +2,32 @@
 import * as React from "react";
 import { cn } from "@/lib/utils";
 
+// Notion-shaped buttons. Restrained chrome: no shadows, subtle borders,
+// minimal weight. Primary stays confident (dark fill) — it's the only
+// element that's permitted to carry presence; everything else is quiet.
+
 type Variant = "primary" | "secondary" | "ghost" | "outline" | "danger";
 type Size = "sm" | "md" | "lg";
 
 const variants: Record<Variant, string> = {
-  primary:
-    "bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm",
+  // Primary: near-black fill. The single confident action on a page.
+  primary: "bg-foreground text-background hover:bg-foreground/90",
+  // Secondary: barely-bordered button on the page background.
   secondary:
-    "bg-surface text-foreground border border-border hover:bg-accent",
+    "bg-transparent text-foreground border border-border hover:bg-accent",
   ghost: "text-foreground hover:bg-accent",
   outline:
     "border border-border text-foreground hover:bg-accent bg-transparent",
-  danger: "bg-danger text-white hover:bg-danger/90",
+  // Danger: muted destructive — colored text on subtle background, not
+  // a saturated red block.
+  danger:
+    "bg-danger/10 text-danger border border-danger/20 hover:bg-danger/15",
 };
 
 const sizes: Record<Size, string> = {
-  sm: "h-8 px-3 text-xs gap-1.5",
-  md: "h-9 px-4 text-sm gap-2",
-  lg: "h-11 px-5 text-sm gap-2",
+  sm: "h-7 px-2.5 text-xs gap-1.5",
+  md: "h-8 px-3 text-[13px] gap-1.5",
+  lg: "h-10 px-4 text-sm gap-2",
 };
 
 export interface ButtonProps

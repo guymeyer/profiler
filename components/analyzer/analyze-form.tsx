@@ -18,6 +18,7 @@ import type {
   PartialRecommendation,
 } from "@/lib/llm/analyze";
 import type { RecommendationResult } from "@/lib/types";
+import { documentToResearch } from "@/lib/document-adapters";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input, Select, Textarea } from "@/components/ui/input";
@@ -40,13 +41,13 @@ export function AnalyzeForm() {
   const selectedCustomer = selectedCustomerId
     ? customers[selectedCustomerId]
     : undefined;
-  const researchMap = useProfilerStore((s) => s.research ?? {});
+  const documents = useProfilerStore((s) => s.documents ?? {});
   const selectedResearchIds = useProfilerStore(
     (s) => s.selectedResearchIds ?? [],
   );
   const selectedResearch = selectedResearchIds
-    .map((id) => researchMap[id])
-    .filter(Boolean);
+    .map((id) => documents[id])
+    .filter((d) => d?.kind === "research");
   const okrsMap = useProfilerStore((s) => s.okrs ?? {});
   const selectedOKRIds = useProfilerStore((s) => s.selectedOKRIds ?? []);
   const selectedOKRs = selectedOKRIds
@@ -169,7 +170,7 @@ export function AnalyzeForm() {
         objectiveIds: storedObjectiveIds,
         intent: storedIntent.trim() || undefined,
         customer: selectedCustomer,
-        research: selectedResearch,
+        research: selectedResearch.map(documentToResearch),
         okrs: selectedOKRs,
         strategyOnly: strategyMode,
         audienceOverrides,
@@ -374,7 +375,7 @@ export function AnalyzeForm() {
                 {selectedResearch.map((r) => (
                   <li key={r.id} className="text-xs leading-snug">
                     <a
-                      href={`/research/${r.id}`}
+                      href={`/documents/${r.id}`}
                       className="hover:underline font-medium"
                     >
                       {r.title}

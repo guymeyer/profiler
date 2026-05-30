@@ -91,7 +91,14 @@ export async function extractDocument(
     const result = await mammoth.extractRawText({ buffer: buf });
     const text = sanitize(result.value);
     for (const msg of result.messages ?? []) {
-      if (msg.type === "warning") warnings.push(`mammoth: ${msg.message}`);
+      if (msg.type !== "warning") continue;
+      // Mammoth emits "An unrecognised element was ignored: w:tblPrEx" (and
+      // dozens of similar messages) routinely. They mean Word-internal
+      // structural elements were skipped; the text content itself is intact.
+      // Suppress them so we only surface warnings that actually imply lost
+      // content (empty docs, dropped images, etc).
+      if (/unrecognised element/i.test(msg.message)) continue;
+      warnings.push(`mammoth: ${msg.message}`);
     }
     if (!text.trim()) {
       warnings.push("DOCX appears empty or contains only images.");
@@ -230,9 +237,8 @@ export async function categorizeResearch(args: {
       client.messages.create({
         model: "claude-sonnet-4-6",
         // Cap covers the metadata fields plus a bodyMarkdown rewrite of a
-        // reasonable-length source. Lowered from 8192 to bound per-call cost
-        // on the public deployment; for huge source documents bump back up.
-        max_tokens: 4096,
+        // reasonable-length source.
+        max_tokens: 8192,
         system: CATEGORIZE_SYSTEM_PROMPT,
         tools: [CATEGORIZE_TOOL as unknown as Anthropic.Messages.Tool],
         tool_choice: { type: "tool", name: CATEGORIZE_TOOL.name },

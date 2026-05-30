@@ -279,14 +279,19 @@ function BusinessUnitsCard() {
               key={bu.id}
               className="flex items-center gap-3 p-3 rounded-md border hover:bg-accent/40 group"
             >
-              <div className="min-w-0 flex-1">
-                <div className="font-medium text-sm">{bu.name}</div>
+              <Link
+                href={`/business-units/${bu.id}`}
+                className="min-w-0 flex-1"
+              >
+                <div className="font-medium text-sm hover:text-primary transition-colors">
+                  {bu.name}
+                </div>
                 {bu.description && (
                   <div className="text-xs text-muted-foreground truncate">
                     {bu.description}
                   </div>
                 )}
-              </div>
+              </Link>
               <button
                 onClick={() => setEditingId(bu.id)}
                 className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-foreground text-xs transition-opacity inline-flex items-center gap-1"
