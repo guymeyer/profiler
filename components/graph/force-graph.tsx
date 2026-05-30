@@ -57,7 +57,13 @@ const SPRING_K = 0.02;
 const SPRING_REST = 80;
 const CENTER_K = 0.005;
 const DAMPING = 0.85;
-const MAX_TICKS = 360;
+const MAX_TICKS = 240;
+// Total kinetic energy below this means the graph has settled — stop the
+// simulation early instead of running the full tick budget.
+const CONVERGENCE_KE = 0.05;
+// Bucket cached layouts by id-set so unrelated edits don't invalidate
+// the cache; positions still drift if the topology actually changed.
+const CACHE_PREFIX = "profiler:graph-layout:";
 
 export function ForceGraph({
   nodes,
@@ -82,12 +88,17 @@ export function ForceGraph({
   );
 
   useEffect(() => {
+    // Try to reuse a settled layout from the previous visit. Positions
+    // are stored per dataKey so the cache only hits when the node+edge
+    // set is identical to what was rendered last time.
+    const cached = loadCachedLayout(dataKey);
     const byId = new Map<string, SimNode>();
     for (const n of nodes) {
+      const prev = cached?.get(n.id);
       byId.set(n.id, {
         ...n,
-        x: WIDTH / 2 + (Math.random() - 0.5) * WIDTH * 0.6,
-        y: HEIGHT / 2 + (Math.random() - 0.5) * HEIGHT * 0.6,
+        x: prev?.x ?? WIDTH / 2 + (Math.random() - 0.5) * WIDTH * 0.6,
+        y: prev?.y ?? HEIGHT / 2 + (Math.random() - 0.5) * HEIGHT * 0.6,
         vx: 0,
         vy: 0,
         degree: 0,
@@ -104,16 +115,26 @@ export function ForceGraph({
     }
     simNodes.current = Array.from(byId.values());
     simEdges.current = edgeList;
-    ticksLeft.current = MAX_TICKS;
+    // Cached layouts are already near-settled — a short polish pass is
+    // enough. Fresh layouts get the full tick budget.
+    ticksLeft.current = cached ? 40 : MAX_TICKS;
 
     function step() {
       if (ticksLeft.current <= 0) {
+        saveCachedLayout(dataKey, simNodes.current);
         rafRef.current = null;
         return;
       }
       ticksLeft.current -= 1;
-      tick(simNodes.current, simEdges.current);
+      const ke = tick(simNodes.current, simEdges.current);
       forceRerender((v) => v + 1);
+      // Stop early once kinetic energy drops below the threshold —
+      // saves the full RAF budget on small or already-settled graphs.
+      if (ke < CONVERGENCE_KE && ticksLeft.current < MAX_TICKS - 20) {
+        saveCachedLayout(dataKey, simNodes.current);
+        rafRef.current = null;
+        return;
+      }
       rafRef.current = requestAnimationFrame(step);
     }
     rafRef.current = requestAnimationFrame(step);
@@ -210,8 +231,9 @@ export function ForceGraph({
   );
 }
 
-// One simulation tick. Mutates `nodes` in place.
-function tick(nodes: SimNode[], edges: SimEdge[]) {
+// One simulation tick. Mutates `nodes` in place. Returns the total
+// kinetic energy so callers can detect convergence and stop early.
+function tick(nodes: SimNode[], edges: SimEdge[]): number {
   const cx = WIDTH / 2;
   const cy = HEIGHT / 2;
 
@@ -249,6 +271,7 @@ function tick(nodes: SimNode[], edges: SimEdge[]) {
   }
 
   // Weak pull toward the center to keep the graph on-screen.
+  let ke = 0;
   for (const n of nodes) {
     n.vx += (cx - n.x) * CENTER_K;
     n.vy += (cy - n.y) * CENTER_K;
@@ -259,5 +282,42 @@ function tick(nodes: SimNode[], edges: SimEdge[]) {
     // Clamp to canvas with a small margin.
     n.x = Math.max(20, Math.min(WIDTH - 20, n.x));
     n.y = Math.max(20, Math.min(HEIGHT - 20, n.y));
+    ke += n.vx * n.vx + n.vy * n.vy;
+  }
+  return ke / nodes.length;
+}
+
+// ── sessionStorage layout cache ─────────────────────────────────────────
+// Caches settled positions per dataKey so revisiting /graph picks up
+// where we left off instead of springing from random. sessionStorage
+// (not localStorage) keeps the cache tab-scoped — opening a fresh tab
+// gets a fresh layout, which matches user intuition.
+
+interface CachedPos {
+  x: number;
+  y: number;
+}
+
+function loadCachedLayout(key: string): Map<string, CachedPos> | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.sessionStorage.getItem(CACHE_PREFIX + key);
+    if (!raw) return null;
+    const data = JSON.parse(raw) as Record<string, CachedPos>;
+    return new Map(Object.entries(data));
+  } catch {
+    return null;
+  }
+}
+
+function saveCachedLayout(key: string, nodes: SimNode[]): void {
+  if (typeof window === "undefined") return;
+  try {
+    const data: Record<string, CachedPos> = {};
+    for (const n of nodes) data[n.id] = { x: n.x, y: n.y };
+    window.sessionStorage.setItem(CACHE_PREFIX + key, JSON.stringify(data));
+  } catch {
+    // Quota or serialization issue — fall back to fresh layouts on
+    // next visit; not worth alerting the user.
   }
 }

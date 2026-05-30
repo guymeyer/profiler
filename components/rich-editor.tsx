@@ -249,14 +249,23 @@ function buildMentionSuggestion(getEntities: () => EntityChoice[]) {
         if (positioner) {
           positioner.innerHTML = "";
         }
-        if (portal) {
-          portal.root.unmount();
-          portal.container.remove();
-          portal = null;
-          positioner = null;
-        }
-        component?.destroy();
+        // React 19 errors if a root is unmounted synchronously while
+        // React is already rendering — which is exactly the call shape
+        // here, since `onExit` fires from TipTap's command flow during
+        // an editor render. Defer the unmount to a microtask so React
+        // can finish committing first.
+        const expiring = portal;
+        const expiringComponent = component;
+        portal = null;
+        positioner = null;
         component = null;
+        queueMicrotask(() => {
+          if (expiring) {
+            expiring.root.unmount();
+            expiring.container.remove();
+          }
+          expiringComponent?.destroy();
+        });
       }
     },
   };
