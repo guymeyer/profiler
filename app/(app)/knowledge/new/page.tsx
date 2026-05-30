@@ -292,7 +292,9 @@ export default function KnowledgeIntakePage() {
           kind: "research",
           title: cat.title?.trim() || "Untitled research",
           summary: cat.summary ?? "",
-          content: cat.bodyMarkdown ?? text,
+          // Intake preserves the source verbatim — synthesis is where
+          // AI rewrites happen.
+          content: text,
           source: cat.sourceHint ?? "Internal",
           tags: dedupe([
             ...(cat.tags ?? []),
@@ -317,7 +319,9 @@ export default function KnowledgeIntakePage() {
           kind: "prd",
           title: cat.title?.trim() || "Untitled PRD",
           summary: cat.summary ?? "",
-          content: cat.bodyMarkdown ?? text,
+          // Intake preserves the source verbatim — synthesis is where
+          // AI rewrites happen.
+          content: text,
           source: cat.sourceHint,
           tags: dedupe([
             ...(cat.tags ?? []),
@@ -349,7 +353,9 @@ export default function KnowledgeIntakePage() {
           kind: "memo",
           title: cat.title?.trim() || "Untitled memo",
           summary: cat.summary ?? "",
-          content: cat.bodyMarkdown ?? text,
+          // Intake preserves the source verbatim — synthesis is where
+          // AI rewrites happen.
+          content: text,
           source: cat.sourceHint,
           tags: dedupe([
             ...(cat.tags ?? []),

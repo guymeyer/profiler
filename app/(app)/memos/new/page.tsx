@@ -77,7 +77,9 @@ export default function NewMemoPage() {
         kind: "memo",
         title: cat.title ?? file.name.replace(/\.[^.]+$/, ""),
         summary: cat.summary ?? "",
-        content: cat.bodyMarkdown ?? extracted.text,
+        // Intake preserves the source content verbatim — only metadata
+        // gets LLM-extracted. Use `Synthesize` if you want AI to rewrite.
+        content: extracted.text,
         source: cat.sourceHint,
         tags: cat.tags ?? [],
         linkedPersonIds: [],
