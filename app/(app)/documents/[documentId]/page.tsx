@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter, redirect } from "next/navigation";
 import {
   ArrowLeft,
+  FileText,
   Loader2,
   Lock,
   Settings2,
@@ -77,6 +78,7 @@ export default function DocumentDetailPage({ params }: Props) {
   const [extractError, setExtractError] = useState<string | null>(null);
   const propertiesOpen = useProfilerStore((s) => s.propertiesPanelOpen);
   const setPropertiesOpen = useProfilerStore((s) => s.setPropertiesPanelOpen);
+  const [originalOpen, setOriginalOpen] = useState(false);
   const [saveState, setSaveState] = useState<
     "idle" | "dirty" | "saving" | "saved"
   >("idle");
@@ -270,6 +272,15 @@ export default function DocumentDetailPage({ params }: Props) {
                 }
               />
             )}
+            {document.originalContent && (
+              <Button
+                variant="secondary"
+                onClick={() => setOriginalOpen((v) => !v)}
+              >
+                <FileText className="w-3.5 h-3.5" />
+                {originalOpen ? "Hide original" : "View original"}
+              </Button>
+            )}
             <Button
               variant="secondary"
               onClick={() => setPropertiesOpen(!propertiesOpen)}
@@ -340,6 +351,18 @@ export default function DocumentDetailPage({ params }: Props) {
         entities={entityChoices}
         placeholder={`Start writing the ${config.label.toLowerCase()}…  # for headings, @ to mention`}
       />
+
+      {originalOpen && document.originalContent && (
+        <Section
+          title="Original upload"
+          subtitle="verbatim, immutable — cite this for ground-truth quotes"
+          divider
+        >
+          <pre className="whitespace-pre-wrap break-words text-[13px] leading-relaxed text-foreground/85 bg-muted/30 border border-border rounded-md p-4 max-h-[60vh] overflow-auto">
+            {document.originalContent}
+          </pre>
+        </Section>
+      )}
 
       {extractError && (
         <div className="text-[13px] text-danger mt-4">

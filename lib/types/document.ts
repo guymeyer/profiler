@@ -38,7 +38,15 @@ export interface DocumentBase {
   kind: DocumentKind;
   title: string;
   summary: string;
+  // The editable body. For uploaded documents this is an LLM-synthesized
+  // version optimized for insights and downstream synthesis — clean
+  // structure, key facts preserved, noise removed. For docs typed
+  // directly into the editor this is the user's writing verbatim.
   content: string;
+  // The verbatim source as uploaded — the ground-truth citation users
+  // can view alongside the synthesized body. Set when content is
+  // LLM-derived; absent for docs typed directly into the editor.
+  originalContent?: string;
   source?: string;
   tags: string[];
   linkedPersonIds: string[];

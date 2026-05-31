@@ -28,7 +28,19 @@ export interface ParsedDoc {
   sections: Record<string, string[]>;
 }
 
-export function parseDoc(md: string): ParsedDoc {
+export function parseDoc(
+  md: string,
+  opts: { terminalAliases?: string[] } = {},
+): ParsedDoc {
+  // Terminal sections "swallow" all following ## headings as part of their
+  // own content rather than starting new sections. Lets the body capture
+  // LLM-produced sub-structure (## TL;DR, ## Key metrics, ## Findings)
+  // without each one becoming an unknown top-level section that gets
+  // dropped during round-trip.
+  const terminal = new Set(
+    (opts.terminalAliases ?? []).map((a) => a.toLowerCase()),
+  );
+
   const lines = md.split(/\r?\n/);
   let cursor = 0;
 
@@ -56,14 +68,16 @@ export function parseDoc(md: string): ParsedDoc {
 
   const sections: Record<string, string[]> = {};
   let currentHeading: string | null = null;
+  let inTerminal = false;
   let buf: string[] = [];
   for (; cursor < lines.length; cursor++) {
     const line = lines[cursor];
     const m = line.match(/^##\s+(.+?)\s*$/);
-    if (m) {
+    if (m && !inTerminal) {
       if (currentHeading) sections[currentHeading] = buf;
       currentHeading = m[1].trim().toLowerCase().replace(/[:.]+$/, "");
       buf = [];
+      if (terminal.has(currentHeading)) inTerminal = true;
     } else if (currentHeading) {
       buf.push(line);
     }
@@ -294,6 +308,7 @@ The full content of the research goes here.
       uploadedFrom: existing?.uploadedFrom,
       sourceUrl: existing?.sourceUrl,
       locked: existing?.locked,
+      originalContent: existing?.originalContent,
       createdAt: existing?.createdAt ?? now,
       updatedAt: existing ? now : undefined,
       properties: {
@@ -464,6 +479,7 @@ The full PRD content goes here.
       uploadedFrom: existing?.uploadedFrom,
       sourceUrl: existing?.sourceUrl,
       locked: existing?.locked,
+      originalContent: existing?.originalContent,
       createdAt: existing?.createdAt ?? now,
       updatedAt: existing ? now : undefined,
       properties: {
@@ -613,6 +629,7 @@ The full memo content goes here.
       uploadedFrom: existing?.uploadedFrom,
       sourceUrl: existing?.sourceUrl,
       locked: existing?.locked,
+      originalContent: existing?.originalContent,
       createdAt: existing?.createdAt ?? now,
       updatedAt: existing ? now : undefined,
       properties: {
@@ -766,7 +783,11 @@ export function markdownToDocument<K extends DocumentKind>(
   opts: { existing?: DocumentOfKind<K>; kind?: K } = {},
 ): ParsedDocument<K> {
   const kind = (opts.existing?.kind ?? opts.kind ?? ("note" as DocumentKind)) as K;
-  const parsed = parseDoc(md);
+  // Body is always the terminal section: anything ## inside the body
+  // (TL;DR, Key metrics, Findings, etc.) belongs to the body, not as a
+  // sibling top-level section. Without this, LLM-produced body
+  // sub-structure would be silently dropped on round-trip.
+  const parsed = parseDoc(md, { terminalAliases: ["body", "content"] });
   const spec = SPECS[kind] as KindMarkdownSpec<K> | undefined;
   if (spec) return spec.fromMarkdown(parsed, { existing: opts.existing });
   return genericFromMarkdown<K>(kind, parsed, opts);

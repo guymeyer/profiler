@@ -302,9 +302,16 @@ function KnowledgeIntakePage() {
         id,
         title: cat.title?.trim() || defaultTitleFor(kind),
         summary: cat.summary ?? "",
-        // Intake preserves the source verbatim — synthesis is where
-        // AI rewrites happen.
-        content: text,
+        // Body is the LLM-synthesized version — tight, structured,
+        // optimized for synthesis + decisions. Falls back to raw text
+        // when the synthesis pass isn't available (no API key, model
+        // failure, etc.). Either way the raw extracted source is also
+        // saved as `originalContent` below, so the user can always cite
+        // the verbatim original.
+        content: cat.bodyMarkdown?.trim() || text,
+        // Verbatim source kept as a citation. Only set when the body
+        // is LLM-derived (i.e. an actual upload, not a hand-typed doc).
+        originalContent: cat.bodyMarkdown?.trim() ? text : undefined,
         tags: dedupe([
           ...(cat.tags ?? []),
           ...classification.suggestedLinks.tags,
