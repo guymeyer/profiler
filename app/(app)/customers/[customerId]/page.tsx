@@ -2,71 +2,55 @@
 import { use, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import {
-  ArrowLeft,
-  Pencil,
-  Building2,
-  AlertTriangle,
-  Sparkles,
-  Loader2,
-  Users,
-  Compass,
-  ShieldAlert,
-  Flag,
-  FileSearch,
-  Plus,
-  RotateCcw,
-} from "lucide-react";
-import { Badge } from "@/components/ui/badge";
+import { AlertTriangle, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { Section } from "@/components/ui/section";
 import { MarkdownEditor } from "@/components/admin/markdown-editor";
+import { Backlinks } from "@/components/backlinks";
 import { useProfilerStore } from "@/lib/store";
+import { useCompany } from "@/lib/hooks/use-companies";
+import { useHydrated } from "@/lib/hooks/use-hydrated";
 import {
   customerToMarkdown,
   markdownToCustomer,
 } from "@/lib/customer-md";
-import {
-  researchCustomer,
-  researchCustomerStakeholders,
-} from "@/app/(app)/customers/actions";
-import {
-  useCustomerEmployees,
-  INFLUENCE_LEVELS,
-  INFLUENCE_LABELS,
-  sortByOrgChart,
-} from "@/lib/people-hooks";
-import { Avatar } from "@/components/ui/avatar";
-import { AutoBrief } from "@/components/auto-brief";
-import { Backlinks } from "@/components/backlinks";
-import { PageHeader } from "@/components/ui/page-header";
-import { Section } from "@/components/ui/section";
-import type { Customer, Person } from "@/lib/types";
+import { researchCustomer } from "@/app/(app)/customers/actions";
+import { CompanyDetailShell } from "@/components/company/company-detail-shell";
+import { CustomerIntelPanel } from "@/components/company/customer-intel-panel";
+import type { Customer, CustomerCompany } from "@/lib/types";
 
 interface Props {
   params: Promise<{ customerId: string }>;
 }
 
-export default function CustomerPage({ params }: Props) {
+// Customer overview. Uses the shared CompanyDetailShell, so the People /
+// OKRs / Business units sub-nav is identical to /company. The intel
+// panel (buying triggers / red flags / etc.) renders here on the
+// overview only — those fields are customer-kind specific.
+
+export default function CustomerOverviewPage({ params }: Props) {
   const { customerId } = use(params);
   const router = useRouter();
-  const customer = useProfilerStore((s) => s.customers?.[customerId]);
+  const company = useCompany(customerId);
+  const customer: CustomerCompany | undefined =
+    company?.kind === "customer" ? company : undefined;
   const saveCustomer = useProfilerStore((s) => s.saveCustomer);
   const deleteCustomer = useProfilerStore((s) => s.deleteCustomer);
-  const setSelectedCustomerId = useProfilerStore((s) => s.setSelectedCustomerId);
+  const setSelectedCustomerId = useProfilerStore(
+    (s) => s.setSelectedCustomerId,
+  );
 
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const [warnings, setWarnings] = useState<string[]>([]);
-  const [hydrated, setHydrated] = useState(false);
   const [researching, setResearching] = useState(false);
   const [researchError, setResearchError] = useState<string | null>(null);
-
-  useEffect(() => setHydrated(true), []);
+  const hydrated = useHydrated();
 
   useEffect(() => {
     if (editing && customer) {
-      setDraft(customerToMarkdown(customer));
+      setDraft(customerToMarkdown(legacyCustomerFromCompany(customer)));
       setWarnings([]);
     }
   }, [editing, customer]);
@@ -76,22 +60,19 @@ export default function CustomerPage({ params }: Props) {
     return (
       <div className="max-w-3xl mx-auto py-16 text-center">
         <h1 className="text-xl font-semibold">Customer not found</h1>
-        <p className="text-muted-foreground mt-2">
-          They may have been deleted or generated in another browser.
-        </p>
-        <div className="mt-6">
-          <Link href="/customers">
-            <Button>Back to customers</Button>
-          </Link>
-        </div>
+        <Link href="/customers" className="text-primary hover:underline mt-4 inline-block">
+          ← Back to Customers
+        </Link>
       </div>
     );
   }
 
   function handleSave() {
+    if (!customer) return;
+    const legacy = legacyCustomerFromCompany(customer);
     const { customer: parsed, warnings: parseWarnings } = markdownToCustomer(
       draft,
-      { existingId: customer!.id, existing: customer! },
+      { existingId: customer.id, existing: legacy },
     );
     saveCustomer(parsed);
     setWarnings(parseWarnings);
@@ -99,24 +80,26 @@ export default function CustomerPage({ params }: Props) {
   }
 
   function handleDelete() {
-    deleteCustomer(customer!.id);
+    if (!customer) return;
+    if (!confirm(`Delete ${customer.name}?`)) return;
+    deleteCustomer(customer.id);
     router.push("/customers");
   }
 
   async function handleReresearch() {
+    if (!customer) return;
     setResearchError(null);
     setResearching(true);
     try {
       const result = await researchCustomer({
-        companyName: customer!.name,
-        context: customer!.summary || undefined,
+        companyName: customer.name,
+        context: customer.summary || undefined,
       });
-      // Merge — keep id and createdAt, replace research-derived fields
       saveCustomer({
         ...result,
-        id: customer!.id,
-        createdAt: customer!.createdAt,
-        tags: Array.from(new Set([...customer!.tags, ...result.tags])),
+        id: customer.id,
+        createdAt: customer.createdAt,
+        tags: Array.from(new Set([...customer.tags, ...result.tags])),
       });
     } catch (e) {
       setResearchError((e as Error).message);
@@ -126,64 +109,46 @@ export default function CustomerPage({ params }: Props) {
   }
 
   function handleUseInAudience() {
-    setSelectedCustomerId(customer!.id);
+    if (!customer) return;
+    setSelectedCustomerId(customer.id);
     router.push("/audience");
   }
 
   return (
-    <div>
-      <Link
-        href="/customers"
-        className="inline-flex items-center gap-1 text-[12px] text-muted-foreground hover:text-foreground mb-3"
-      >
-        <ArrowLeft className="w-3 h-3" />
-        Customers
-      </Link>
-
-      <PageHeader
-        eyebrow="Customer"
-        title={customer.name}
-        meta={
-          <>
-            {[customer.industry, customer.size, customer.region]
-              .filter(Boolean)
-              .join(" · ") || "Unspecified"}
-            {" · "}
-            <span className="text-foreground/80">
-              {customer.source === "research" ? "Researched" : "Manual"}
-            </span>
-            {customer.researchedAt && (
-              <> · researched {new Date(customer.researchedAt).toLocaleDateString()}</>
-            )}
-          </>
-        }
-        actions={
-          <>
-            <Button variant="secondary" onClick={handleUseInAudience}>
-              Use in audience
-            </Button>
-            <Button
-              variant="secondary"
-              onClick={handleReresearch}
-              disabled={researching}
-            >
-              {researching ? (
-                <>
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  Researching…
-                </>
-              ) : (
-                "Re-research"
-              )}
-            </Button>
-            {!editing && (
-              <Button variant="secondary" onClick={() => setEditing(true)}>
-                Edit
-              </Button>
-            )}
-          </>
-        }
-      />
+    <CompanyDetailShell
+      companyId={customer.id}
+      baseHref={`/customers/${customer.id}`}
+      backHref="/customers"
+      backLabel="Customers"
+    >
+      <div className="flex flex-wrap items-center gap-2 mb-4">
+        <Button variant="secondary" size="sm" onClick={handleUseInAudience}>
+          Use in audience
+        </Button>
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={handleReresearch}
+          disabled={researching}
+        >
+          {researching ? (
+            <>
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              Researching…
+            </>
+          ) : (
+            "Re-research"
+          )}
+        </Button>
+        {!editing && (
+          <Button variant="secondary" size="sm" onClick={() => setEditing(true)}>
+            Edit
+          </Button>
+        )}
+        <Button variant="ghost" size="sm" onClick={handleDelete}>
+          Delete
+        </Button>
+      </div>
 
       {researchError && (
         <Card className="p-4 mb-4 border-danger/30 bg-danger/[0.05]">
@@ -201,374 +166,40 @@ export default function CustomerPage({ params }: Props) {
             onChange={setDraft}
             onSave={handleSave}
             onCancel={() => setEditing(false)}
-            onDelete={handleDelete}
             warnings={warnings}
             saveLabel="Save customer"
           />
         </Card>
       ) : (
-        <div>
-          <Section title="Summary">
-            <p className="text-[15px] leading-relaxed text-foreground/90">
-              {customer.summary || "No summary yet."}
-            </p>
-          </Section>
-
-          <Section title="Brief" divider>
-            <CustomerAutoBrief customer={customer} />
-          </Section>
-
+        <>
+          <CustomerIntelPanel customer={customer} />
           <Section title="References" divider>
             <Backlinks entity={{ kind: "customer", id: customer.id }} />
           </Section>
-
-          <CustomerList
-            icon={Users}
-            title="Known stakeholders"
-            items={customer.knownStakeholders}
-          />
-          <CustomerList
-            icon={Flag}
-            title="Buying triggers"
-            items={customer.buyingTriggers}
-          />
-          <CustomerList
-            icon={Compass}
-            title="Evaluation criteria"
-            items={customer.evaluationCriteria}
-          />
-          <CustomerList
-            icon={ShieldAlert}
-            title="Red flags"
-            items={customer.redFlags}
-          />
-          <CustomerList
-            icon={AlertTriangle}
-            title="Competitive context"
-            items={customer.competitiveContext}
-          />
-          <CustomerList
-            icon={Sparkles}
-            title="Notes"
-            items={customer.notes}
-          />
-
-          {customer.tags.length > 0 && (
-            <Section title="Tags" divider>
-              <div className="flex flex-wrap gap-1">
-                {customer.tags.map((t) => (
-                  <Badge key={t} tone="subtle">
-                    {t}
-                  </Badge>
-                ))}
-              </div>
-            </Section>
-          )}
-
-          <Section title="Employees" divider>
-            <EmployeesSection customer={customer} />
-          </Section>
-        </div>
+        </>
       )}
-    </div>
+    </CompanyDetailShell>
   );
 }
 
-function EmployeesSection({ customer }: { customer: import("@/lib/types").Customer }) {
-  const employees = useCustomerEmployees(customer.id);
-  const saveProfile = useProfilerStore((s) => s.saveProfile);
-  const deleteProfile = useProfilerStore((s) => s.deleteProfile);
-  const [discovering, setDiscovering] = useState(false);
-  const [discoverError, setDiscoverError] = useState<string | null>(null);
-
-  const grouped = INFLUENCE_LEVELS.map((level) => ({
-    level,
-    members: employees.filter((p) => p.influence === level).sort(sortByOrgChart),
-  }));
-
-  async function discover() {
-    setDiscoverError(null);
-    setDiscovering(true);
-    try {
-      const drafts = await researchCustomerStakeholders({ customer });
-      // De-dupe by id — research re-runs shouldn't multiply entries
-      const existingIds = new Set(employees.map((e) => e.id));
-      for (const d of drafts) {
-        if (!existingIds.has(d.id)) saveProfile(d);
-      }
-    } catch (e) {
-      setDiscoverError((e as Error).message);
-    } finally {
-      setDiscovering(false);
-    }
-  }
-
-  return (
-    <div>
-      <div className="flex items-start justify-between gap-2 mb-4 flex-wrap">
-        <div className="text-[12px] text-muted-foreground">
-          {employees.length === 0
-            ? "No employees yet."
-            : `${employees.length} on file`}
-        </div>
-        <div className="flex items-center gap-1.5 flex-wrap">
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={discover}
-            disabled={discovering}
-          >
-            {discovering ? (
-              <>
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                Researching…
-              </>
-            ) : employees.length === 0 ? (
-              "Discover stakeholders"
-            ) : (
-              "Re-discover"
-            )}
-          </Button>
-          <Link href={`/customers/${customer.id}/employees/new`}>
-            <Button size="sm">Add employee</Button>
-          </Link>
-        </div>
-      </div>
-
-      {discoverError && (
-        <div className="text-[13px] text-danger mb-3">{discoverError}</div>
-      )}
-
-      {employees.length === 0 ? (
-        <div className="text-[13px] text-muted-foreground italic">
-          Run discovery to draft a roster from public sources, or add
-          stakeholders manually.
-        </div>
-      ) : (
-        <div className="space-y-5">
-          {grouped.map(
-            ({ level, members }) =>
-              members.length > 0 && (
-                <SortableLevelGroup
-                  key={level}
-                  level={level}
-                  members={members}
-                  onReorder={(ids) => {
-                    ids.forEach((id, idx) => {
-                      const m = members.find((mm) => mm.id === id);
-                      if (m) saveProfile({ ...m, rankWithinLevel: idx });
-                    });
-                  }}
-                  onRemove={(id) => deleteProfile(id)}
-                />
-              ),
-          )}
-          <p className="text-[11px] text-muted-foreground mt-1">
-            Drag rows within a band to rerank seniority.
-          </p>
-        </div>
-      )}
-    </div>
-  );
+// Adapter for the legacy customer-md round-trip. Phased out in PR 20.
+function legacyCustomerFromCompany(c: CustomerCompany): Customer {
+  return {
+    id: c.id,
+    name: c.name,
+    industry: c.industry,
+    size: c.size,
+    region: c.region,
+    summary: c.summary,
+    knownStakeholders: c.properties.knownStakeholders,
+    buyingTriggers: c.properties.buyingTriggers,
+    evaluationCriteria: c.properties.evaluationCriteria,
+    redFlags: c.properties.redFlags,
+    competitiveContext: c.properties.competitiveContext,
+    notes: c.properties.notes,
+    tags: c.tags,
+    source: c.properties.source,
+    researchedAt: c.properties.researchedAt,
+    createdAt: c.createdAt,
+  };
 }
-
-function SortableLevelGroup({
-  level,
-  members,
-  onReorder,
-  onRemove,
-}: {
-  level: Person["influence"];
-  members: Person[];
-  onReorder: (ids: string[]) => void;
-  onRemove: (id: string) => void;
-}) {
-  const [dragId, setDragId] = useState<string | null>(null);
-  const [dropOverId, setDropOverId] = useState<string | null>(null);
-
-  function handleDragStart(id: string) {
-    setDragId(id);
-  }
-  function handleDragOver(e: React.DragEvent, id: string) {
-    e.preventDefault();
-    setDropOverId(id);
-  }
-  function handleDrop(targetId: string) {
-    if (!dragId || dragId === targetId) {
-      setDragId(null);
-      setDropOverId(null);
-      return;
-    }
-    const ids = members.map((m) => m.id);
-    const from = ids.indexOf(dragId);
-    const to = ids.indexOf(targetId);
-    if (from < 0 || to < 0) {
-      setDragId(null);
-      setDropOverId(null);
-      return;
-    }
-    const next = [...ids];
-    next.splice(from, 1);
-    next.splice(to, 0, dragId);
-    setDragId(null);
-    setDropOverId(null);
-    onReorder(next);
-  }
-
-  return (
-    <div>
-      <div className="flex items-center gap-2 text-[11px] uppercase tracking-wide font-semibold text-muted-foreground mb-2">
-        <span className="font-mono">{level}</span>
-        <div className="h-px bg-border flex-1" />
-        <span className="font-mono">{INFLUENCE_LABELS[level]}</span>
-      </div>
-      <div className="space-y-1">
-        {members.map((p) => (
-          <EmployeeRow
-            key={p.id}
-            person={p}
-            dragging={dragId === p.id}
-            dropTarget={dropOverId === p.id && dragId !== null && dragId !== p.id}
-            onDragStart={() => handleDragStart(p.id)}
-            onDragEnd={() => {
-              setDragId(null);
-              setDropOverId(null);
-            }}
-            onDragOver={(e) => handleDragOver(e, p.id)}
-            onDrop={() => handleDrop(p.id)}
-            onRemove={() => onRemove(p.id)}
-          />
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function EmployeeRow({
-  person,
-  dragging,
-  dropTarget,
-  onDragStart,
-  onDragEnd,
-  onDragOver,
-  onDrop,
-  onRemove,
-}: {
-  person: Person;
-  dragging?: boolean;
-  dropTarget?: boolean;
-  onDragStart?: () => void;
-  onDragEnd?: () => void;
-  onDragOver?: (e: React.DragEvent) => void;
-  onDrop?: () => void;
-  onRemove: () => void;
-}) {
-  return (
-    <div
-      draggable
-      onDragStart={onDragStart}
-      onDragEnd={onDragEnd}
-      onDragOver={onDragOver}
-      onDrop={onDrop}
-      className={`group flex items-center gap-3 p-3 rounded-md border transition-colors ${
-        dragging ? "opacity-40" : ""
-      } ${dropTarget ? "border-primary bg-primary/[0.05]" : "hover:bg-accent/40"}`}
-    >
-      <span
-        className="cursor-grab active:cursor-grabbing text-muted-foreground select-none text-sm leading-none"
-        aria-hidden
-        title="Drag to reorder"
-      >
-        ⋮⋮
-      </span>
-      <Avatar name={person.name} size={36} />
-      <Link
-        href={`/people/${person.id}`}
-        className="flex-1 min-w-0 hover:text-primary"
-      >
-        <div className="font-medium text-sm truncate">{person.name}</div>
-        <div className="text-xs text-muted-foreground truncate">
-          {person.title}
-          {person.team ? ` · ${person.team}` : ""}
-        </div>
-      </Link>
-      {person.source === "research" && (
-        <Badge tone="subtle" className="text-[10px]">
-          Researched
-        </Badge>
-      )}
-      <button
-        onClick={onRemove}
-        className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-danger text-xs transition-opacity"
-        aria-label="Remove employee"
-      >
-        Remove
-      </button>
-    </div>
-  );
-}
-
-function CustomerList({
-  title,
-  items,
-}: {
-  icon?: React.ComponentType<{ className?: string }>;
-  title: string;
-  items: string[];
-}) {
-  if (items.length === 0) return null;
-  return (
-    <Section title={title} divider>
-      <ul className="text-[14px] text-foreground/90 leading-relaxed list-disc pl-5 space-y-1.5">
-        {items.map((item, i) => (
-          <li key={i}>{item}</li>
-        ))}
-      </ul>
-    </Section>
-  );
-}
-
-function CustomerAutoBrief({ customer }: { customer: Customer }) {
-  const documents = useProfilerStore((s) => s.documents ?? {});
-
-  const blocks: { label: string; body: string }[] = [];
-  for (const d of Object.values(documents)) {
-    if (!d.linkedCustomerIds.includes(customer.id)) continue;
-    if (d.kind === "research") {
-      blocks.push({
-        label: `Research: ${d.title}`,
-        body: `${d.summary}\n\n${d.content.slice(0, 1500)}`,
-      });
-    } else if (d.kind === "prd") {
-      blocks.push({
-        label: `PRD: ${d.title}`,
-        body: `Status: ${d.properties.status}\nProblem: ${d.properties.problem}\n${d.summary}`,
-      });
-    } else if (d.kind === "memo") {
-      blocks.push({
-        label: `Memo: ${d.title}`,
-        body: `${d.summary}\n${(d.properties.keyClaims ?? []).slice(0, 3).join("; ")}`,
-      });
-    }
-  }
-  if (customer.summary) {
-    blocks.push({
-      label: "Customer profile",
-      body: customer.summary,
-    });
-  }
-
-  return (
-    <AutoBrief
-      subject={{
-        kind: "customer",
-        name: customer.name,
-        description: [customer.industry, customer.size, customer.region]
-          .filter(Boolean)
-          .join(" · "),
-      }}
-      contextBlocks={blocks}
-    />
-  );
-}
-

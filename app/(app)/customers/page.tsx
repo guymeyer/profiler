@@ -1,5 +1,4 @@
 "use client";
-import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page-header";
@@ -8,18 +7,13 @@ import {
   DbDate,
   type InlineDatabaseColumn,
 } from "@/components/ui/inline-database";
-import { useProfilerStore } from "@/lib/store";
+import { useCustomerCompaniesList } from "@/lib/hooks/use-companies";
+import { useHydrated } from "@/lib/hooks/use-hydrated";
 import type { Customer } from "@/lib/types";
 
 export default function CustomersPage() {
-  const customers = useProfilerStore((s) => s.customers ?? {});
-  const [hydrated, setHydrated] = useState(false);
-  useEffect(() => setHydrated(true), []);
-
-  const list = Object.values(customers).sort(
-    (a, b) =>
-      new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-  );
+  const list = useCustomerCompaniesList();
+  const hydrated = useHydrated();
 
   const columns: InlineDatabaseColumn<Customer>[] = [
     {

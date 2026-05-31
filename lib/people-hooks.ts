@@ -32,6 +32,17 @@ export function useCustomerEmployees(customerId: string): Person[] {
   return useEffectivePeople().filter((p) => p.customerId === customerId);
 }
 
+// Every person scoped to a Company (internal or customer). Uses the new
+// `companyId` field with fall-back to the legacy `customerId` during
+// the transition: pre-PR 15 seeded people have neither set and default
+// to the internal Company.
+export function usePeopleByCompany(companyId: string): Person[] {
+  return useEffectivePeople().filter((p) => {
+    const id = p.companyId ?? p.customerId ?? "internal";
+    return id === companyId;
+  });
+}
+
 export function useEffectivePerson(id: string): Person | undefined {
   return useEffectivePeople().find((p) => p.id === id);
 }

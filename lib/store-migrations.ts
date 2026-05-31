@@ -7,14 +7,25 @@
 // unified `documents` record.
 
 import type {
+  BusinessUnit,
+  Company,
+  CustomerCompany,
   Document,
   DocumentBase,
+  InternalCompany,
   MemoDocument,
   MicrositeDocument,
+  OKR,
+  Person,
   PRDDocument,
   ResearchDocument,
   DeckDocument,
 } from "@/lib/types";
+import { INTERNAL_COMPANY_ID } from "@/lib/types";
+
+// Name used for the seeded internal Company. Baked in for now; once
+// Clerk multi-tenant lands this becomes the workspace's display name.
+const INTERNAL_COMPANY_NAME = "ServiceNow";
 
 // Loose shapes describing the legacy v1 records — kept as `any`-ish maps
 // so a malformed snapshot doesn't crash boot. The migration only reads
@@ -263,5 +274,150 @@ function deckToDocument(d: LegacyDeck): DeckDocument {
       generatedBy: d.generatedBy,
       model: d.model,
     },
+  };
+}
+
+// ───────── v2 → v3: People + OKRs + BUs scope to a Company ─────────────
+// Seeds a singular internal Company, folds every legacy `Customer` into
+// `companies` as kind="customer", and backfills `companyId` on Person /
+// OKR / BusinessUnit. Document.linkedCustomerIds is duplicated to
+// linkedCompanyIds — the field rename happens in PR 20 cleanup.
+
+interface LegacyV2Customer {
+  id: string;
+  name: string;
+  industry?: string;
+  size?: string;
+  region?: string;
+  summary: string;
+  knownStakeholders: string[];
+  buyingTriggers: string[];
+  evaluationCriteria: string[];
+  redFlags: string[];
+  competitiveContext: string[];
+  notes: string[];
+  tags: string[];
+  source: "manual" | "research";
+  researchedAt?: string;
+  createdAt: string;
+}
+
+interface LegacyV2Snapshot {
+  customers?: Record<string, LegacyV2Customer>;
+  customProfiles?: Record<string, Person>;
+  okrs?: Record<string, OKR>;
+  businessUnits?: Record<string, BusinessUnit>;
+  companies?: Record<string, Company>;
+  documents?: Record<string, Document & { linkedCustomerIds?: string[] }>;
+  [key: string]: unknown;
+}
+
+export function migrateV2ToV3(
+  persisted: unknown,
+): Record<string, unknown> {
+  if (!persisted || typeof persisted !== "object") return {};
+  const snapshot = persisted as LegacyV2Snapshot;
+  const now = new Date().toISOString();
+
+  // 1. Build the companies record. Seed the internal Company first;
+  //    every existing Customer becomes a kind=customer Company.
+  const companies: Record<string, Company> = {
+    ...(snapshot.companies ?? {}),
+  };
+  if (!companies[INTERNAL_COMPANY_ID]) {
+    const internal: InternalCompany = {
+      id: INTERNAL_COMPANY_ID,
+      kind: "internal",
+      name: INTERNAL_COMPANY_NAME,
+      summary: "",
+      tags: [],
+      createdAt: now,
+      properties: {},
+    };
+    companies[INTERNAL_COMPANY_ID] = internal;
+  }
+  for (const c of Object.values(snapshot.customers ?? {})) {
+    if (!c?.id) continue;
+    if (companies[c.id]) continue; // never overwrite a hand-edited Company
+    const cust: CustomerCompany = {
+      id: c.id,
+      kind: "customer",
+      name: c.name,
+      summary: c.summary ?? "",
+      industry: c.industry,
+      size: c.size,
+      region: c.region,
+      tags: c.tags ?? [],
+      createdAt: c.createdAt ?? now,
+      properties: {
+        knownStakeholders: c.knownStakeholders ?? [],
+        buyingTriggers: c.buyingTriggers ?? [],
+        evaluationCriteria: c.evaluationCriteria ?? [],
+        redFlags: c.redFlags ?? [],
+        competitiveContext: c.competitiveContext ?? [],
+        notes: c.notes ?? [],
+        source: c.source ?? "manual",
+        researchedAt: c.researchedAt,
+      },
+    };
+    companies[c.id] = cust;
+  }
+
+  // 2. Backfill Person.companyId. customerId set → that company; absent
+  //    → internal. customerId is left in place during the transition;
+  //    PR 20 deletes it.
+  const customProfiles: Record<string, Person> = {};
+  for (const [id, p] of Object.entries(snapshot.customProfiles ?? {})) {
+    if (!p) continue;
+    customProfiles[id] = {
+      ...p,
+      companyId: p.companyId ?? p.customerId ?? INTERNAL_COMPANY_ID,
+    };
+  }
+
+  // 3. OKRs: everything pre-v3 was implicitly internal — no per-customer
+  //    OKRs existed. Backfill companyId="internal" for any without one.
+  const okrs: Record<string, OKR> = {};
+  for (const [id, o] of Object.entries(snapshot.okrs ?? {})) {
+    if (!o) continue;
+    okrs[id] = {
+      ...o,
+      companyId: o.companyId ?? INTERNAL_COMPANY_ID,
+    };
+  }
+
+  // 4. BusinessUnits: same — all existing BUs scoped to internal.
+  const businessUnits: Record<string, BusinessUnit> = {};
+  for (const [id, b] of Object.entries(snapshot.businessUnits ?? {})) {
+    if (!b) continue;
+    businessUnits[id] = {
+      ...b,
+      companyId: b.companyId ?? INTERNAL_COMPANY_ID,
+    };
+  }
+
+  // 5. Documents: duplicate linkedCustomerIds → linkedCompanyIds so
+  //    readers can switch over. The legacy field is dropped in PR 20.
+  const documents: Record<string, Document & { linkedCompanyIds?: string[] }> = {};
+  for (const [id, d] of Object.entries(snapshot.documents ?? {})) {
+    if (!d) continue;
+    const linkedCustomerIds = (d as { linkedCustomerIds?: string[] })
+      .linkedCustomerIds;
+    documents[id] = {
+      ...d,
+      linkedCompanyIds:
+        (d as { linkedCompanyIds?: string[] }).linkedCompanyIds ??
+        linkedCustomerIds ??
+        [],
+    };
+  }
+
+  return {
+    ...snapshot,
+    companies,
+    customProfiles,
+    okrs,
+    businessUnits,
+    documents,
   };
 }

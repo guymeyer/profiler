@@ -8,11 +8,10 @@ import { cn } from "@/lib/utils";
 
 const NAV = [
   { href: "/", label: "Home" },
-  { href: "/people", label: "People" },
+  { href: "/company", label: "Company" },
   { href: "/customers", label: "Customers" },
   { href: "/knowledge", label: "Knowledge" },
   { href: "/objectives", label: "Objectives" },
-  { href: "/okrs", label: "OKRs" },
   { href: "/audience", label: "Audience builder" },
   { href: "/analyze", label: "Analyze artifact" },
   { href: "/synthesis", label: "Synthesis" },

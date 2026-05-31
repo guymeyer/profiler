@@ -2,6 +2,7 @@
 import { useMemo } from "react";
 import { useProfilerStore } from "@/lib/store";
 import { useEffectivePeople } from "@/lib/people-hooks";
+import { useCustomerCompanies } from "@/lib/hooks/use-companies";
 import { OBJECTIVES } from "@/lib/data/objectives";
 import {
   DOCUMENT_KIND_LABELS,
@@ -19,7 +20,7 @@ import type { EntityChoice } from "@/components/rich-editor";
 export function useEntityChoices(opts: {
   excludeDocumentId?: string;
 } = {}): EntityChoice[] {
-  const customers = useProfilerStore((s) => s.customers ?? {});
+  const customers = useCustomerCompanies();
   const businessUnits = useProfilerStore((s) => s.businessUnits ?? {});
   const documents = useProfilerStore((s) => s.documents ?? {});
   const people = useEffectivePeople();

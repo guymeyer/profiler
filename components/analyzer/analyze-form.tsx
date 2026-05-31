@@ -26,6 +26,7 @@ import { Avatar } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { ARTIFACT_TYPE_LABELS, type ArtifactType } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { useCustomerCompanies } from "@/lib/hooks/use-companies";
 import { SAMPLE_ARTIFACTS } from "@/lib/data/sample-artifacts";
 
 export function AnalyzeForm() {
@@ -36,7 +37,7 @@ export function AnalyzeForm() {
   const storedPersonIds = useProfilerStore((s) => s.selectedPersonIds);
   const storedObjectiveIds = useProfilerStore((s) => s.selectedObjectiveIds);
   const storedIntent = useProfilerStore((s) => s.audienceIntent ?? "");
-  const customers = useProfilerStore((s) => s.customers ?? {});
+  const customers = useCustomerCompanies();
   const selectedCustomerId = useProfilerStore((s) => s.selectedCustomerId);
   const selectedCustomer = selectedCustomerId
     ? customers[selectedCustomerId]

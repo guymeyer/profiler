@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { MarkdownEditor } from "@/components/admin/markdown-editor";
 import { useProfilerStore } from "@/lib/store";
+import { useCustomerCompanies } from "@/lib/hooks/use-companies";
 import {
   BLANK_CUSTOMER_MARKDOWN,
   customerToMarkdown,
@@ -30,7 +31,7 @@ function NewCustomerForm() {
   const startResearch = params.get("research") === "1";
 
   const saveCustomer = useProfilerStore((s) => s.saveCustomer);
-  const customers = useProfilerStore((s) => s.customers ?? {});
+  const customers = useCustomerCompanies();
 
   const [mode, setMode] = useState<"manual" | "research">(
     startResearch ? "research" : "manual",

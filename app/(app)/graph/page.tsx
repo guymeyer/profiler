@@ -4,7 +4,9 @@ import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
 import { useProfilerStore } from "@/lib/store";
-import { useEffectivePeople } from "@/lib/people-hooks";
+import { useShallow } from "zustand/react/shallow";
+import { usePeopleByCompany } from "@/lib/people-hooks";
+import { INTERNAL_COMPANY_ID } from "@/lib/types";
 import { useHydrated } from "@/lib/hooks/use-hydrated";
 import { OBJECTIVES } from "@/lib/data/objectives";
 import {
@@ -23,17 +25,15 @@ import { cn } from "@/lib/utils";
 // a discrete entity); we treat them as document properties for filtering
 // only. Add a tag-node mode later if useful.
 
-type NodeKind =
-  | "document"
-  | "person"
-  | "customer"
-  | "objective"
-  | "business-unit";
+// Graph is internal-only. Customer companies and the people that belong
+// to them are deliberately excluded — they live on their own /customers/[id]
+// surfaces, where the full Company model is rendered scoped to them.
+
+type NodeKind = "document" | "person" | "objective" | "business-unit";
 
 const KIND_COLOR: Record<NodeKind, string> = {
   document: "var(--primary)",
   person: "#10b981",
-  customer: "#f59e0b",
   objective: "#8b5cf6",
   "business-unit": "#ef4444",
 };
@@ -41,16 +41,25 @@ const KIND_COLOR: Record<NodeKind, string> = {
 const KIND_LABEL: Record<NodeKind, string> = {
   document: "Document",
   person: "Person",
-  customer: "Customer",
   objective: "Objective",
   "business-unit": "Business unit",
 };
 
 export default function GraphPage() {
   const documents = useProfilerStore((s) => s.documents ?? {});
-  const customers = useProfilerStore((s) => s.customers ?? {});
-  const businessUnits = useProfilerStore((s) => s.businessUnits ?? {});
-  const people = useEffectivePeople();
+  // Only internal-scoped BUs and people make it onto the graph.
+  const businessUnits = useProfilerStore(
+    useShallow((s) => {
+      const out: typeof s.businessUnits = {};
+      for (const [id, b] of Object.entries(s.businessUnits ?? {})) {
+        if ((b.companyId ?? INTERNAL_COMPANY_ID) === INTERNAL_COMPANY_ID) {
+          out[id] = b;
+        }
+      }
+      return out;
+    }),
+  );
+  const people = usePeopleByCompany(INTERNAL_COMPANY_ID);
   const hydrated = useHydrated();
 
   const [activeKinds, setActiveKinds] = useState<Set<NodeKind>>(
@@ -60,40 +69,31 @@ export default function GraphPage() {
 
   const { nodes, edges, counts } = useMemo(() => {
     if (!hydrated) {
-      return { nodes: [] as GraphNode[], edges: [] as GraphEdge[], counts: { document: 0, person: 0, customer: 0, objective: 0, "business-unit": 0 } };
+      return {
+        nodes: [] as GraphNode[],
+        edges: [] as GraphEdge[],
+        counts: { document: 0, person: 0, objective: 0, "business-unit": 0 },
+      };
     }
     const ns: GraphNode[] = [];
     const es: GraphEdge[] = [];
     const counts = {
       document: 0,
       person: 0,
-      customer: 0,
       objective: 0,
       "business-unit": 0,
     };
 
-    // People
-    for (const p of people) {
-      if (!activeKinds.has("person")) break;
-      ns.push({
-        id: `node-person-${p.id}`,
-        label: p.name,
-        kind: "person",
-        href: `/people/${p.id}`,
-      });
-      counts.person += 1;
-    }
-
-    // Customers
-    if (activeKinds.has("customer")) {
-      for (const c of Object.values(customers)) {
+    // People (internal-scoped only)
+    if (activeKinds.has("person")) {
+      for (const p of people) {
         ns.push({
-          id: `node-customer-${c.id}`,
-          label: c.name,
-          kind: "customer",
-          href: `/customers/${c.id}`,
+          id: `node-person-${p.id}`,
+          label: p.name,
+          kind: "person",
+          href: `/people/${p.id}`,
         });
-        counts.customer += 1;
+        counts.person += 1;
       }
     }
 
@@ -145,11 +145,8 @@ export default function GraphPage() {
           es.push({ source: `node-doc-${d.id}`, target: `node-person-${pid}` });
         }
       }
-      for (const cid of d.linkedCustomerIds) {
-        if (activeKinds.has("customer")) {
-          es.push({ source: `node-doc-${d.id}`, target: `node-customer-${cid}` });
-        }
-      }
+      // linkedCustomerIds intentionally skipped: customer companies are
+      // off-graph (they each have their own /customers/[id] scope).
       for (const oid of d.linkedObjectiveIds) {
         if (activeKinds.has("objective")) {
           es.push({ source: `node-doc-${d.id}`, target: `node-objective-${oid}` });
@@ -180,14 +177,7 @@ export default function GraphPage() {
       }
     }
     return { nodes: ns, edges: es, counts };
-  }, [
-    hydrated,
-    activeKinds,
-    people,
-    customers,
-    businessUnits,
-    documents,
-  ]);
+  }, [hydrated, activeKinds, people, businessUnits, documents]);
 
   function toggleKind(k: NodeKind) {
     setActiveKinds((prev) => {

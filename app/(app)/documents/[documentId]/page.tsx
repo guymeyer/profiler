@@ -45,6 +45,7 @@ import {
 import { SaveIndicator } from "@/components/document/save-indicator";
 import { SuggestedConnections } from "@/components/document/suggested-connections";
 import { useEntityChoices } from "@/lib/hooks/use-entity-choices";
+import { useCustomerCompanies } from "@/lib/hooks/use-companies";
 import { useHydrated } from "@/lib/hooks/use-hydrated";
 import { detectUnlinkedMentions } from "@/lib/auto-detect-mentions";
 import "@/components/document/properties-panels";
@@ -62,7 +63,7 @@ export default function DocumentDetailPage({ params }: Props) {
   const document = useProfilerStore((s) => s.documents?.[documentId]);
   const saveDocument = useProfilerStore((s) => s.saveDocument);
   const deleteDocument = useProfilerStore((s) => s.deleteDocument);
-  const customers = useProfilerStore((s) => s.customers ?? {});
+  const customers = useCustomerCompanies();
   const businessUnits = useProfilerStore((s) => s.businessUnits ?? {});
   const metrics = useProfilerStore((s) => s.metrics ?? {});
   const replaceMetricsForDocument = useProfilerStore(

@@ -26,6 +26,7 @@ import {
 import { OBJECTIVES } from "@/lib/data/objectives";
 import { runAnalysis } from "@/app/actions";
 import type { RecommendationResult, Customer } from "@/lib/types";
+import { useCustomerCompanies } from "@/lib/hooks/use-companies";
 import { cn } from "@/lib/utils";
 
 interface Props {
@@ -37,7 +38,7 @@ export default function DeltaPage({ params }: Props) {
   const original = useProfilerStore((s) => s.results[resultId]);
   const storeResult = useProfilerStore((s) => s.storeResult);
   const addRecent = useProfilerStore((s) => s.addRecentResult);
-  const customers = useProfilerStore((s) => s.customers ?? {});
+  const customers = useCustomerCompanies();
 
   const INTERNAL = useInternalPeople();
   const ALL = useEffectivePeople();

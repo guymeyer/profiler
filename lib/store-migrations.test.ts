@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { migrateV1ToV2 } from "@/lib/store-migrations";
+import { migrateV1ToV2, migrateV2ToV3 } from "@/lib/store-migrations";
 
 // v1 → v2 migration is the only piece of code that touches persisted user
 // data. A regression here turns first-load into data loss. Cover the
@@ -213,5 +213,153 @@ describe("migrateV1ToV2", () => {
     };
     const v2 = migrateV1ToV2(v1) as { documents: Record<string, unknown> };
     expect(Object.keys(v2.documents)).toEqual(["res_a"]);
+  });
+});
+
+describe("migrateV2ToV3", () => {
+  it("seeds the internal Company when missing", () => {
+    const v3 = migrateV2ToV3({}) as { companies: Record<string, unknown> };
+    const internal = v3.companies.internal as {
+      kind: string;
+      name: string;
+    };
+    expect(internal.kind).toBe("internal");
+    expect(internal.name).toBe("ServiceNow");
+  });
+
+  it("does not overwrite a hand-edited internal Company", () => {
+    const v2 = {
+      companies: {
+        internal: {
+          id: "internal",
+          kind: "internal",
+          name: "Custom Name",
+          summary: "",
+          tags: [],
+          createdAt: "2026-01-01T00:00:00.000Z",
+          properties: {},
+        },
+      },
+    };
+    const v3 = migrateV2ToV3(v2) as { companies: Record<string, unknown> };
+    expect((v3.companies.internal as { name: string }).name).toBe(
+      "Custom Name",
+    );
+  });
+
+  it("folds every Customer into companies as kind=customer", () => {
+    const v2 = {
+      customers: {
+        acme: {
+          id: "acme",
+          name: "Acme",
+          summary: "Big enterprise customer",
+          industry: "Manufacturing",
+          knownStakeholders: ["CFO"],
+          buyingTriggers: ["budget cycle"],
+          evaluationCriteria: ["TCO"],
+          redFlags: [],
+          competitiveContext: [],
+          notes: [],
+          tags: ["enterprise"],
+          source: "research",
+          createdAt: "2026-02-01T00:00:00.000Z",
+        },
+      },
+    };
+    const v3 = migrateV2ToV3(v2) as { companies: Record<string, unknown> };
+    const acme = v3.companies.acme as {
+      kind: string;
+      name: string;
+      properties: { buyingTriggers: string[]; source: string };
+    };
+    expect(acme.kind).toBe("customer");
+    expect(acme.name).toBe("Acme");
+    expect(acme.properties.buyingTriggers).toEqual(["budget cycle"]);
+    expect(acme.properties.source).toBe("research");
+  });
+
+  it("backfills Person.companyId from customerId, defaulting to internal", () => {
+    const v2 = {
+      customProfiles: {
+        p_internal: {
+          id: "p_internal",
+          name: "Alice",
+          title: "PM",
+          team: "Platform",
+        },
+        p_external: {
+          id: "p_external",
+          name: "Bob",
+          title: "CFO",
+          team: "Finance",
+          customerId: "acme",
+        },
+      },
+    };
+    const v3 = migrateV2ToV3(v2) as { customProfiles: Record<string, unknown> };
+    expect(
+      (v3.customProfiles.p_internal as { companyId: string }).companyId,
+    ).toBe("internal");
+    expect(
+      (v3.customProfiles.p_external as { companyId: string }).companyId,
+    ).toBe("acme");
+  });
+
+  it("backfills OKR.companyId and BusinessUnit.companyId to internal", () => {
+    const v2 = {
+      okrs: {
+        o1: {
+          id: "o1",
+          objective: "Grow",
+          keyResults: [],
+          level: "company",
+          ownerPersonIds: [],
+          attachedPersonIds: [],
+          timeframe: "2026",
+          createdAt: "2026-01-01T00:00:00.000Z",
+        },
+      },
+      businessUnits: {
+        bu1: { id: "bu1", name: "Platform", createdAt: "2026-01-01T00:00:00.000Z" },
+      },
+    };
+    const v3 = migrateV2ToV3(v2) as {
+      okrs: Record<string, unknown>;
+      businessUnits: Record<string, unknown>;
+    };
+    expect((v3.okrs.o1 as { companyId: string }).companyId).toBe("internal");
+    expect(
+      (v3.businessUnits.bu1 as { companyId: string }).companyId,
+    ).toBe("internal");
+  });
+
+  it("duplicates Document.linkedCustomerIds → linkedCompanyIds", () => {
+    const v2 = {
+      documents: {
+        d1: {
+          id: "d1",
+          kind: "research",
+          title: "Test",
+          summary: "",
+          content: "",
+          tags: [],
+          linkedPersonIds: [],
+          linkedCustomerIds: ["acme", "globex"],
+          linkedObjectiveIds: [],
+          createdAt: "2026-01-01T00:00:00.000Z",
+          properties: { participants: [] },
+        },
+      },
+    };
+    const v3 = migrateV2ToV3(v2) as { documents: Record<string, unknown> };
+    expect(
+      (v3.documents.d1 as { linkedCompanyIds: string[] }).linkedCompanyIds,
+    ).toEqual(["acme", "globex"]);
+  });
+
+  it("returns empty on null / garbage input", () => {
+    expect(migrateV2ToV3(null)).toEqual({});
+    expect(migrateV2ToV3("nope")).toEqual({});
   });
 });

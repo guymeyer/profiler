@@ -6,13 +6,14 @@ import type {
   ResultFeedback,
   Person,
   Customer,
+  Company,
   BusinessUnit,
   OKR,
   DerivedMetric,
   BURecommendationSet,
   Document,
 } from "@/lib/types";
-import { migrateV1ToV2 } from "@/lib/store-migrations";
+import { migrateV1ToV2, migrateV2ToV3 } from "@/lib/store-migrations";
 
 interface AudienceSelection {
   personIds: string[];
@@ -80,12 +81,21 @@ interface ProfilerStore {
   saveProfile: (p: Person) => void;
   deleteProfile: (id: string) => void;
 
-  // Customers
-  customers: Record<string, Customer>;
+  // Customer compatibility shims. The legacy `customers` slice is gone;
+  // these accept the legacy Customer shape (still used by server actions
+  // and the markdown round-trip) and dispatch to the unified companies
+  // store internally. Removed in a future PR once those callers move to
+  // CustomerCompany directly.
   saveCustomer: (c: Customer) => void;
   deleteCustomer: (id: string) => void;
   selectedCustomerId?: string;
   setSelectedCustomerId: (id: string | undefined) => void;
+
+  // Unified Companies — your internal org + every customer org. Source
+  // of truth for People / OKRs / BusinessUnits scoping.
+  companies: Record<string, Company>;
+  saveCompany: (c: Company) => void;
+  deleteCompany: (id: string) => void;
 
   // Document selection cursor used by audience-builder / synthesis flows.
   // Keyed off document ids regardless of kind — kept on the store so
@@ -240,17 +250,56 @@ export const useProfilerStore = create<ProfilerStore>()(
           return { customProfiles: next };
         }),
 
-      customers: {},
       saveCustomer: (c) =>
-        set((s) => ({ customers: { ...s.customers, [c.id]: c } })),
+        set((s) => {
+          // Convert the legacy Customer shape into a CustomerCompany and
+          // write to the unified companies store. Callers (research server
+          // action, customer-md round-trip) still produce Customer; the
+          // shape conversion happens once, here.
+          const company: Company = {
+            id: c.id,
+            kind: "customer",
+            name: c.name,
+            summary: c.summary,
+            industry: c.industry,
+            size: c.size,
+            region: c.region,
+            tags: c.tags,
+            createdAt: c.createdAt,
+            properties: {
+              knownStakeholders: c.knownStakeholders,
+              buyingTriggers: c.buyingTriggers,
+              evaluationCriteria: c.evaluationCriteria,
+              redFlags: c.redFlags,
+              competitiveContext: c.competitiveContext,
+              notes: c.notes,
+              source: c.source,
+              researchedAt: c.researchedAt,
+            },
+          };
+          return { companies: { ...s.companies, [c.id]: company } };
+        }),
       deleteCustomer: (id) =>
         set((s) => {
-          const next = { ...s.customers };
-          delete next[id];
-          return { customers: next };
+          const nextCompanies = { ...s.companies };
+          delete nextCompanies[id];
+          return { companies: nextCompanies };
         }),
       selectedCustomerId: undefined,
       setSelectedCustomerId: (id) => set({ selectedCustomerId: id }),
+
+      // Seeded by the v2→v3 migration on first rehydrate. Fresh-install
+      // users get the internal Company seeded via store-migrations using
+      // a null-input run during onRehydrateStorage.
+      companies: {},
+      saveCompany: (c) =>
+        set((s) => ({ companies: { ...s.companies, [c.id]: c } })),
+      deleteCompany: (id) =>
+        set((s) => {
+          const next = { ...s.companies };
+          delete next[id];
+          return { companies: next };
+        }),
 
       selectedResearchIds: [],
       toggleResearch: (id) =>
@@ -359,8 +408,8 @@ export const useProfilerStore = create<ProfilerStore>()(
         }),
     }),
     {
-      name: "profiler-store-v2",
-      version: 2,
+      name: "profiler-store-v3",
+      version: 3,
       storage: createJSONStorage(() => localStorage),
       // Strip render caches from the persisted snapshot. The microsite
       // `html` blob is regenerated deterministically from the outline by
@@ -379,14 +428,38 @@ export const useProfilerStore = create<ProfilerStore>()(
           ),
         }) as typeof state,
       migrate: (persisted, fromVersion) => {
+        // Chain the migrations forward. Each one is pure over its input
+        // snapshot, so we can run them in sequence safely.
         try {
-          if (fromVersion < 2) return migrateV1ToV2(persisted);
+          let state = persisted;
+          if (fromVersion < 2) state = migrateV1ToV2(state);
+          if (fromVersion < 3) state = migrateV2ToV3(state);
+          return state as Record<string, unknown>;
         } catch (err) {
           if (typeof console !== "undefined") {
             console.error("[profiler-store] migration failed:", err);
           }
         }
         return persisted as Record<string, unknown>;
+      },
+      onRehydrateStorage: () => (state) => {
+        // First-time load: no persisted data means `migrate` never ran.
+        // Seed the internal Company so /company/* surfaces have a target.
+        if (!state) return;
+        if (!state.companies?.["internal"]) {
+          state.companies = {
+            ...state.companies,
+            internal: {
+              id: "internal",
+              kind: "internal",
+              name: "ServiceNow",
+              summary: "",
+              tags: [],
+              createdAt: new Date().toISOString(),
+              properties: {},
+            },
+          };
+        }
       },
     },
   ),

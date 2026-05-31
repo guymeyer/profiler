@@ -17,6 +17,10 @@ import { MarkdownEditor } from "@/components/admin/markdown-editor";
 import { useEffectivePerson } from "@/lib/people-hooks";
 import { useProfilerStore } from "@/lib/store";
 import {
+  useCompany,
+  useCustomerCompanies,
+} from "@/lib/hooks/use-companies";
+import {
   markdownToPerson,
   personToMarkdown,
 } from "@/lib/profile-md";
@@ -312,8 +316,8 @@ function SimpleListSection({
 }
 
 function CustomerLink({ customerId }: { customerId: string }) {
-  const customer = useProfilerStore((s) => s.customers?.[customerId]);
-  if (!customer) {
+  const customer = useCompany(customerId);
+  if (!customer || customer.kind !== "customer") {
     return <span className="text-muted-foreground">Customer employee</span>;
   }
   return (
@@ -406,7 +410,7 @@ function ExpertiseRow({
 
 function PersonAutoBrief({ person }: { person: Person }) {
   const documents = useProfilerStore((s) => s.documents ?? {});
-  const customers = useProfilerStore((s) => s.customers ?? {});
+  const customers = useCustomerCompanies();
 
   const blocks = (() => {
     const out: { label: string; body: string }[] = [];

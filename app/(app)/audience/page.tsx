@@ -31,6 +31,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input, Textarea } from "@/components/ui/input";
+import { useCustomerCompanies } from "@/lib/hooks/use-companies";
 import { cn } from "@/lib/utils";
 
 export default function AudiencePage() {
@@ -40,7 +41,7 @@ export default function AudiencePage() {
   const objectiveIds = useProfilerStore((s) => s.selectedObjectiveIds);
   const intent = useProfilerStore((s) => s.audienceIntent ?? "");
   const setIntent = useProfilerStore((s) => s.setAudienceIntent);
-  const customers = useProfilerStore((s) => s.customers ?? {});
+  const customers = useCustomerCompanies();
   const selectedCustomerId = useProfilerStore((s) => s.selectedCustomerId);
   const setSelectedCustomerId = useProfilerStore((s) => s.setSelectedCustomerId);
   const selectedCustomer = selectedCustomerId

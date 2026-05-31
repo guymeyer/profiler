@@ -13,6 +13,7 @@ import {
   slugifyId,
 } from "@/lib/profile-md";
 import { slugifyId as slugifyCustomerId } from "@/lib/customer-md";
+import { useCompany } from "@/lib/hooks/use-companies";
 import { PEOPLE } from "@/lib/data/people";
 
 interface Props {
@@ -24,7 +25,7 @@ export default function NewEmployeePage({ params }: Props) {
   const router = useRouter();
   const saveProfile = useProfilerStore((s) => s.saveProfile);
   const customProfiles = useProfilerStore((s) => s.customProfiles ?? {});
-  const customer = useProfilerStore((s) => s.customers?.[customerId]);
+  const customer = useCompany(customerId);
   const [draft, setDraft] = useState(
     BLANK_PERSON_MARKDOWN.replace(
       "- Tags:",

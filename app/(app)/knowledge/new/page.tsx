@@ -32,6 +32,7 @@ import {
   type ArtifactSummary,
 } from "@/lib/llm/suggest-expertise";
 import { mergeExpertiseSuggestion } from "@/lib/expertise-merge";
+import { useCustomerCompanies } from "@/lib/hooks/use-companies";
 import type {
   MemoDocument,
   PRDDocument,
@@ -109,7 +110,7 @@ function KnowledgeIntakePage() {
     return null;
   })();
 
-  const customers = useProfilerStore((s) => s.customers ?? {});
+  const customers = useCustomerCompanies();
   const businessUnits = useProfilerStore((s) => s.businessUnits ?? {});
   const people = useEffectivePeople();
 

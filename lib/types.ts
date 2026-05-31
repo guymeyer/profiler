@@ -26,6 +26,25 @@ export type {
   RFCDocument,
   NoteDocument,
 } from "@/lib/types/document";
+// Unified Company entity (kind=internal|customer). Same pattern as
+// Document — see lib/types/company.ts for the discriminated union.
+export type {
+  Company,
+  CompanyBase,
+  CompanyKind,
+  CompanyOfKind,
+  CompanyPropertiesOfKind,
+  CustomerCompany,
+  CustomerCompanyProperties,
+  InternalCompany,
+  InternalCompanyProperties,
+} from "@/lib/types/company";
+export {
+  COMPANY_KIND_LABELS,
+  INTERNAL_COMPANY_ID,
+  isCompanyKind,
+} from "@/lib/types/company";
+
 export {
   DOCUMENT_KINDS,
   DOCUMENT_KIND_LABELS,
@@ -76,7 +95,13 @@ export interface Person {
 
   // When set, this person is an employee of the named customer rather than
   // someone on your own side. Drives where they appear in the directory.
+  // DEPRECATED: superseded by `companyId`. Both are present during the
+  // transition; PR 20 drops `customerId`.
   customerId?: string;
+  // The Company this person belongs to. "internal" for your own org, a
+  // customer company id otherwise. Optional until the v2→v3 migration
+  // backfills every Person; required from PR 20 onward.
+  companyId?: string;
   // Optional source provenance for researched / drafted profiles.
   source?: "manual" | "research" | "seed";
   researchedAt?: string;
@@ -136,6 +161,9 @@ export interface BusinessUnit {
   description?: string;
   leaderPersonId?: string;
   createdAt: string;
+  // Scopes this BU to a Company. Optional until v2→v3 backfills it to
+  // "internal" for every existing BU (none belonged to customers pre-PR 15).
+  companyId?: string;
 }
 
 export type OKRLevel = "company" | "bu";
@@ -154,6 +182,9 @@ export interface OKR {
   notes?: string;
   createdAt: string;
   updatedAt?: string;
+  // Scopes this OKR to a Company. Optional until v2→v3 backfills to
+  // "internal" for every existing OKR.
+  companyId?: string;
 }
 
 export interface Objective {
