@@ -115,7 +115,7 @@ export default function AudiencePage() {
     personIds.length > 0 || objectiveIds.length > 0 || !!selectedCustomer;
 
   return (
-    <div className="max-w-7xl mx-auto">
+    <div>
       <header className="mb-6">
         <h1 className="text-2xl font-semibold tracking-tight">
           Audience builder
@@ -126,7 +126,7 @@ export default function AudiencePage() {
         </p>
       </header>
 
-      <div className="grid grid-cols-1 xl:grid-cols-[1fr_360px] gap-6">
+      <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_360px] gap-6">
         {/* Left: pickers */}
         <div className="space-y-6">
           <Card className="p-5">

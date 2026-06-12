@@ -67,7 +67,7 @@ export default function NewEmployeePage({ params }: Props) {
   }
 
   return (
-    <div className="max-w-4xl mx-auto">
+    <div>
       <Link
         href={`/customers/${customerId}`}
         className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-4"

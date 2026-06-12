@@ -24,10 +24,12 @@ import {
   SYNTHESIS_LENS_BY_ID,
   type PersonLensDepth,
   type PersonLensSection,
+  type ResearchDocument,
   type Synthesis,
   type SynthesisLensId,
   type SynthesisLensSection,
 } from "@/lib/types";
+import { documentToResearch } from "@/lib/document-adapters";
 import { renderSynthesisHtml } from "@/lib/llm/synthesize-render";
 import { CopyPromptButton } from "@/components/copy-prompt-button";
 import { PeopleRecommendations } from "@/components/people-recommendations";
@@ -137,7 +139,8 @@ export default function SynthesisDetailPage() {
     try {
       const selected = synthesis.researchIds
         .map((rid) => documents[rid])
-        .filter((d) => d?.kind === "research");
+        .filter((d): d is ResearchDocument => d?.kind === "research")
+        .map(documentToResearch);
       const res = await fetch("/api/synthesis/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -284,7 +287,7 @@ export default function SynthesisDetailPage() {
           </p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-[220px_1fr_300px] gap-6 items-start">
+        <div className="grid grid-cols-1 lg:grid-cols-[220px_minmax(0,1fr)_300px] gap-6 items-start">
           {/* Lens sidebar */}
           <aside className="lg:sticky lg:top-20">
             <Card className="p-3">

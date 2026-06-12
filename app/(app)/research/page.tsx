@@ -51,7 +51,7 @@ export default function ResearchPage() {
   });
 
   return (
-    <div className="max-w-7xl mx-auto">
+    <div>
       <header className="mb-6 flex items-start justify-between gap-4 flex-wrap">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Research</h1>

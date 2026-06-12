@@ -27,6 +27,7 @@ export async function POST(req: Request) {
       headers: { "Content-Type": "application/json" },
     });
   } catch (e) {
+    console.error("[synthesis/generate]", e);
     return new Response(
       JSON.stringify({ error: (e as Error).message ?? "Generation failed." }),
       {

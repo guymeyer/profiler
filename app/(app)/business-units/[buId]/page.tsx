@@ -184,7 +184,7 @@ export default function BusinessUnitDashboardPage({ params }: Props) {
         <div className="text-[13px] text-danger mb-3">{error}</div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6 items-start">
+      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_320px] gap-6 items-start">
         <div className="space-y-6 min-w-0">
           {/* Recommendations rollup */}
           {recSet && (

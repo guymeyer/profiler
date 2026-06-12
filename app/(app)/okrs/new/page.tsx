@@ -13,7 +13,7 @@ export default function NewOKRPage() {
   const people = useEffectivePeople();
 
   return (
-    <div className="max-w-4xl mx-auto">
+    <div>
       <Link
         href="/okrs"
         className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-4"

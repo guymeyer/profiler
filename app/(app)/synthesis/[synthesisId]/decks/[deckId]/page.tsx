@@ -185,7 +185,7 @@ export default function DeckViewerPage({ params }: Props) {
   }
 
   return (
-    <div className="max-w-6xl mx-auto">
+    <div>
       <div className="flex items-center justify-between gap-2 flex-wrap mb-3">
         <Link
           href={`/synthesis/${synthesisId}`}

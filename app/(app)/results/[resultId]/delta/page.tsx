@@ -140,7 +140,7 @@ export default function DeltaPage({ params }: Props) {
   }
 
   return (
-    <div className="max-w-7xl mx-auto">
+    <div>
       <Link
         href={`/results/${original.id}`}
         className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-4"
@@ -159,7 +159,7 @@ export default function DeltaPage({ params }: Props) {
         </p>
       </header>
 
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-6 mb-6">
+      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_360px] gap-6 mb-6">
         <div className="space-y-4">
           <Card className="p-5">
             <h3 className="font-semibold mb-3">Audience for the re-run</h3>

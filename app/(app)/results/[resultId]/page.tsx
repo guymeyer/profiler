@@ -108,7 +108,7 @@ export default function ResultsPage({ params }: Props) {
         : "danger";
 
   return (
-    <div className="max-w-6xl mx-auto">
+    <div>
       <Link
         href="/analyze"
         className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-4"
@@ -1018,7 +1018,7 @@ function RevisedSection({
 
 function ResultsSkeleton() {
   return (
-    <div className="max-w-6xl mx-auto space-y-4">
+    <div className="space-y-4">
       <div className="skeleton h-8 w-2/3 mb-6" />
       <div className="skeleton h-32" />
       <div className="skeleton h-24" />

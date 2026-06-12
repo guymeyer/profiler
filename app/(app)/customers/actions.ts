@@ -93,11 +93,11 @@ export async function researchCustomer(args: {
   // the deterministic mock draft. Set PUBLIC_LOCKDOWN=1 in Vercel for public
   // deployments to bound spend.
   if (process.env.PUBLIC_LOCKDOWN === "1") {
-    return buildMockResearch(name, args.context);
+    return buildMockResearch(name, args.context, "lockdown");
   }
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return buildMockResearch(name, args.context);
+  if (!apiKey) return buildMockResearch(name, args.context, "no-key");
 
   const client = new Anthropic({ apiKey, maxRetries: 2 });
   const userPrompt = `Research the company "${name}" and produce a structured customer profile useful for tailoring an enterprise pitch.
@@ -165,15 +165,23 @@ function toCustomer(
 }
 
 // Deterministic mock so the flow works end-to-end without an API key.
-function buildMockResearch(name: string, context?: string): Customer {
+function buildMockResearch(
+  name: string,
+  context?: string,
+  reason: "no-key" | "lockdown" = "no-key",
+): Customer {
   const ctx = context?.trim();
+  const reasonText =
+    reason === "lockdown"
+      ? "PUBLIC_LOCKDOWN is enabled, so the web_search-backed Claude call was skipped to bound spend"
+      : "no Anthropic API key is configured";
   return toCustomer(
     {
       name,
       industry: "Unknown — fill in",
       size: "Unknown",
       region: "Unknown",
-      summary: `Mock-mode draft for ${name}. No web search ran because no Anthropic API key is configured. ${
+      summary: `Mock-mode draft for ${name}. No web search ran because ${reasonText}. ${
         ctx
           ? `Captured your context: "${ctx.slice(0, 200)}".`
           : "Add real findings before using this in a pitch."
@@ -199,7 +207,9 @@ function buildMockResearch(name: string, context?: string): Customer {
         "Find one comparable case study in their industry",
       ],
       notes: [
-        "This is a deterministic placeholder — re-run with an API key for real research.",
+        reason === "lockdown"
+          ? "This is a deterministic placeholder — disable PUBLIC_LOCKDOWN to re-run with real research."
+          : "This is a deterministic placeholder — re-run with an API key for real research.",
       ],
       tags: ["draft", "mock"],
     },
@@ -299,10 +309,11 @@ export async function researchCustomerStakeholders(args: {
   // Lockdown: same rationale as researchCustomer — this call is the most
   // expensive in the app (up to 8 web searches + a long synthesis).
   if (process.env.PUBLIC_LOCKDOWN === "1") {
-    return buildMockStakeholders(args.customer, args.context);
+    return buildMockStakeholders(args.customer, args.context, "lockdown");
   }
   const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return buildMockStakeholders(args.customer, args.context);
+  if (!apiKey)
+    return buildMockStakeholders(args.customer, args.context, "no-key");
 
   const client = new Anthropic({ apiKey, maxRetries: 2 });
   const customerBrief = [
@@ -399,9 +410,14 @@ function toPerson(draft: StakeholderDraft, customer: Customer): Person {
 function buildMockStakeholders(
   customer: Customer,
   context?: string,
+  reason: "no-key" | "lockdown" = "no-key",
 ): Person[] {
   const ctx = context?.trim();
   const ctxNote = ctx ? ` Captured context: "${ctx.slice(0, 80)}…"` : "";
+  const reasonTail =
+    reason === "lockdown"
+      ? "Replace once PUBLIC_LOCKDOWN is disabled and real research runs."
+      : "Replace once real research runs with an API key.";
   const seeds: StakeholderDraft[] = [
     {
       name: `${customer.name} CFO`,
@@ -409,7 +425,7 @@ function buildMockStakeholders(
       team: "Finance",
       influence: "executive",
       commStyle: ["data-driven"],
-      summary: `Mock placeholder.${ctxNote} Replace with the real CFO's profile once research is run with an API key.`,
+      summary: `Mock placeholder.${ctxNote} ${reasonTail}`,
       decisionTriggers: ["ROI within 12 months", "Verifiable risk reduction"],
       objections: ["Procurement timing", "Hidden integration cost"],
       dos: ["Lead with finance-grade numbers", "Show a peer reference"],
@@ -422,7 +438,7 @@ function buildMockStakeholders(
       team: "Engineering",
       influence: "executive",
       commStyle: ["technical", "operational"],
-      summary: `Mock placeholder.${ctxNote} Replace once research runs with an API key.`,
+      summary: `Mock placeholder.${ctxNote} ${reasonTail}`,
       decisionTriggers: ["Concrete failure-mode handling", "Migration path"],
       objections: ["Vendor lock-in", "Operational complexity"],
       dos: ["Show the failure modes up front", "Bring a real reference architecture"],

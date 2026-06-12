@@ -19,6 +19,8 @@ import { Input } from "@/components/ui/input";
 import { useProfilerStore } from "@/lib/store";
 import { useEffectivePeople } from "@/lib/people-hooks";
 import { SYNTHESIS_LENSES, type Synthesis } from "@/lib/types";
+import { documentToResearch, documentToPRD } from "@/lib/document-adapters";
+import type { PRDDocument, ResearchDocument } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 export default function NewSynthesisPage() {
@@ -82,10 +84,12 @@ export default function NewSynthesisPage() {
     try {
       const selected = selectedResearchIds
         .map((id) => documents[id])
-        .filter((d) => d?.kind === "research");
+        .filter((d): d is ResearchDocument => d?.kind === "research")
+        .map(documentToResearch);
       const selectedPrds = selectedPrdIds
         .map((id) => documents[id])
-        .filter((d) => d?.kind === "prd");
+        .filter((d): d is PRDDocument => d?.kind === "prd")
+        .map(documentToPRD);
       const selectedPeople = selectedPersonIds
         .map((id) => people.find((p) => p.id === id))
         .filter(Boolean);
@@ -113,7 +117,7 @@ export default function NewSynthesisPage() {
   }
 
   return (
-    <div className="max-w-5xl mx-auto">
+    <div>
       <Link
         href="/synthesis"
         className="text-sm text-muted-foreground hover:text-foreground inline-flex items-center gap-1 mb-4"
@@ -136,7 +140,7 @@ export default function NewSynthesisPage() {
       </header>
 
       {!hydrated ? null : (
-        <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6 items-start">
+        <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_320px] gap-6 items-start">
           <div className="flex flex-col gap-6 min-w-0">
             <Card className="p-5">
               <div className="flex items-center gap-2 mb-3">

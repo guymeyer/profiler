@@ -15,7 +15,7 @@ export default function ObjectivesPage() {
   const toggle = useProfilerStore((s) => s.toggleObjective);
 
   return (
-    <div className="max-w-5xl mx-auto">
+    <div>
       <header className="mb-6 flex items-end justify-between flex-wrap gap-4">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">
